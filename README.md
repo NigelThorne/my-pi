@@ -225,8 +225,9 @@ External pi packages:
 
 Included as a git submodule at `extensions/pi-remote/`. This is a fork of [@q.roy/pi-remote](https://github.com/ruanqisevik/pi-mono-extensions) with automatic Tailscale integration:
 
-- On `/remote`, automatically runs `tailscale serve --bg --https 443 --set-path /pi-{session-id}` to expose the remote session over HTTPS on your tailnet
-- Each session gets a unique subpath with an auth token: `https://your-host.tailnet.ts.net/pi-abc123?token=...`
+- On `/remote`, automatically runs `tailscale serve --bg --https 443 --set-path /pi/{session-id}/` to expose the remote session over HTTPS on your tailnet
+- Each session gets a unique subpath with an auth token: `https://your-host.tailnet.ts.net/pi/abc123/?token=...`
+- QR code modal shows the Tailscale URL when available (with LAN URL fallback)
 - Uses Tailscale's auto-provisioned TLS certificate (MagicDNS)
 - The serve route is automatically cleaned up when the session exits (without affecting other `tailscale serve` routes)
 - Falls back gracefully if Tailscale is not installed or not running

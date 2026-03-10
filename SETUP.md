@@ -97,7 +97,7 @@ git submodule update --init --recursive
 cd extensions/pi-remote/packages/remote && npm install && npm run build
 ```
 
-This fork automatically runs `tailscale serve` when starting a remote session, exposing it over HTTPS on a unique subpath (`/pi-{session-id}?token=...`) with Tailscale's auto-provisioned TLS certificate. The serve route is cleaned up when the session exits.
+This fork automatically runs `tailscale serve` when starting a remote session, exposing it over HTTPS on a unique subpath (`/pi/{session-id}/?token=...`) with Tailscale's auto-provisioned TLS certificate. The serve route is cleaned up when the session exits.
 
 Requires Tailscale to be installed and running on the machine.
 
