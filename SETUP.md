@@ -81,11 +81,14 @@ Install npm packages listed in settings.json:
 
 ```bash
 pi install npm:pi-context
+pi install npm:@q.roy/pi-remote
 ```
 
 **[pi-context](https://github.com/ttttmr/pi-context)** - Git-like context management for AI agents:
 - `/context` - View token usage dashboard
 - `/skill:context-management` - Enable the workflow with tools: `context_tag`, `context_log`, `context_checkout`
+
+**[@q.roy/pi-remote](https://github.com/ruanqisevik/pi-mono-extensions)** - Remote terminal access for pi via WebSocket and browser
 
 ## 8. Verify
 

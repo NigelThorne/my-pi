@@ -11,6 +11,7 @@
     "~/.claude/skills"
   ],
   "packages": [
-    "npm:pi-context"
+    "npm:pi-context",
+    "npm:@q.roy/pi-remote"
   ]
 }

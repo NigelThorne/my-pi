@@ -211,3 +211,12 @@ Usage: `/skill:brave-search "query"` or just ask naturally.
 ### superpowers
 
 14 workflow skills from [obra/superpowers](https://github.com/obra/superpowers) that enforce disciplined development practices — brainstorming before building, writing tests before code, systematic debugging before fixing, and verification before claiming done. These are pure SKILL.md files with no dependencies.
+
+## Packages
+
+External pi packages installed via npm:
+
+| Package | Description |
+|---------|-------------|
+| [pi-context](https://github.com/ttttmr/pi-context) | Git-like context management (`/context`, `context_tag`, etc.) |
+| [@q.roy/pi-remote](https://github.com/ruanqisevik/pi-mono-extensions) | Remote terminal access via WebSocket and browser |
