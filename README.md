@@ -227,11 +227,14 @@ Included as a git submodule at `extensions/pi-remote/`. This is a fork of [@q.ro
 
 - On `/remote`, automatically runs `tailscale serve --bg --https 443 --set-path /pi/{session-id}/` to expose the remote session over HTTPS on your tailnet
 - Each session gets a unique subpath with an auth token: `https://your-host.tailnet.ts.net/pi/abc123/?token=...`
-- QR code modal shows the Tailscale URL when available (with LAN URL fallback)
+- QR code modal shows the Tailscale URL when available (with LAN URL as fallback)
 - Uses Tailscale's auto-provisioned TLS certificate (MagicDNS)
 - The serve route is automatically cleaned up when the session exits (without affecting other `tailscale serve` routes)
 - Falls back gracefully if Tailscale is not installed or not running
-- Shows both the LAN URL and Tailscale URL in the TUI widget
+- TUI widget shows Tailscale URL, LAN URL, and token in a bordered card
+- Token auth enforced on all connections (including localhost/Tailscale proxy)
+- Browser auth modal prompts for token if missing/invalid
+- Session ended overlay when pi exits; scroll-to-bottom button; styled 403/404 error pages
 
 Setup:
 
