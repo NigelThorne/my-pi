@@ -1,0 +1,4 @@
+[submodule "extensions/pi-remote"]
+	path = extensions/pi-remote
+	url = git@github.com:noahsaso/pi-remote.git
+	branch = feat/tailscale

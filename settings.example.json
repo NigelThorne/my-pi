@@ -12,6 +12,6 @@
   ],
   "packages": [
     "npm:pi-context",
-    "npm:@q.roy/pi-remote"
+    "~/.my-pi/extensions/pi-remote/packages/remote"
   ]
 }

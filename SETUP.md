@@ -81,15 +81,26 @@ Install npm packages listed in settings.json:
 
 ```bash
 pi install npm:pi-context
-pi install npm:@q.roy/pi-remote
 ```
 
 **[pi-context](https://github.com/ttttmr/pi-context)** - Git-like context management for AI agents:
 - `/context` - View token usage dashboard
 - `/skill:context-management` - Enable the workflow with tools: `context_tag`, `context_log`, `context_checkout`
 
-**[@q.roy/pi-remote](https://github.com/ruanqisevik/pi-mono-extensions)** - Remote terminal access for pi via WebSocket and browser
+## 8. pi-remote (submodule)
 
-## 8. Verify
+The pi-remote package is included as a git submodule with Tailscale integration. Initialize and build it:
+
+```bash
+cd ~/.my-pi
+git submodule update --init --recursive
+cd extensions/pi-remote/packages/remote && npm install && npm run build
+```
+
+This fork automatically runs `tailscale serve` when starting a remote session, exposing it over HTTPS on a unique subpath (`/pi-{session-id}?token=...`) with Tailscale's auto-provisioned TLS certificate. The serve route is cleaned up when the session exits.
+
+Requires Tailscale to be installed and running on the machine.
+
+## 9. Verify
 
 Run `pi -p "list all available tools"` to confirm everything loaded.

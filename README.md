@@ -214,9 +214,28 @@ Usage: `/skill:brave-search "query"` or just ask naturally.
 
 ## Packages
 
-External pi packages installed via npm:
+External pi packages:
 
-| Package | Description |
-|---------|-------------|
-| [pi-context](https://github.com/ttttmr/pi-context) | Git-like context management (`/context`, `context_tag`, etc.) |
-| [@q.roy/pi-remote](https://github.com/ruanqisevik/pi-mono-extensions) | Remote terminal access via WebSocket and browser |
+| Package | Source | Description |
+|---------|--------|-------------|
+| [pi-context](https://github.com/ttttmr/pi-context) | npm | Git-like context management (`/context`, `context_tag`, etc.) |
+| [pi-remote](https://github.com/noahsaso/pi-remote) | git submodule | Remote terminal access via WebSocket and browser, with Tailscale integration |
+
+### pi-remote (fork with Tailscale)
+
+Included as a git submodule at `extensions/pi-remote/`. This is a fork of [@q.roy/pi-remote](https://github.com/ruanqisevik/pi-mono-extensions) with automatic Tailscale integration:
+
+- On `/remote`, automatically runs `tailscale serve --bg --https 443 --set-path /pi-{session-id}` to expose the remote session over HTTPS on your tailnet
+- Each session gets a unique subpath with an auth token: `https://your-host.tailnet.ts.net/pi-abc123?token=...`
+- Uses Tailscale's auto-provisioned TLS certificate (MagicDNS)
+- The serve route is automatically cleaned up when the session exits (without affecting other `tailscale serve` routes)
+- Falls back gracefully if Tailscale is not installed or not running
+- Shows both the LAN URL and Tailscale URL in the TUI widget
+
+Setup:
+
+```bash
+cd ~/.my-pi
+git submodule update --init --recursive
+cd extensions/pi-remote/packages/remote && npm install && npm run build
+```
