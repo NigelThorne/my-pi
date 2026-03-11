@@ -41,6 +41,12 @@ digraph when_to_use {
 - Each reviewer starts fresh (no anchoring to implementer's perspective)
 - Structured quality gates still enforced
 
+## Prerequisites
+
+**Before starting, the user must run `/acm` in pi** to enable Agentic Context Management from the pi-context extension. Without it, `context_checkout` will fail.
+
+If `context_checkout` returns an error saying "Agentic context management is not enabled", ask the user to run `/acm` and retry.
+
 ## The Process
 
 ```dot
