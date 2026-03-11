@@ -218,7 +218,7 @@ External pi packages:
 
 | Package | Source | Description |
 |---------|--------|-------------|
-| [pi-context](https://github.com/ttttmr/pi-context) | npm | Git-like context management (`/context`, `context_tag`, etc.) |
+| [pi-context](https://github.com/ttttmr/pi-context) | git submodule | Git-like context management (`/context`, `context_tag`, etc.) |
 | [pi-remote](https://github.com/noahsaso/pi-remote) | git submodule | Remote terminal access via WebSocket and browser, with Tailscale integration |
 
 ### pi-remote (fork with Tailscale)
