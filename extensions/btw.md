@@ -15,11 +15,13 @@ When pi is in the middle of a long task, you often want to:
 
 | Command | Description |
 |---------|-------------|
-| `/btw <message>` | Send a message in the side conversation. Streams the response in a widget above the editor. Works while the agent is running. |
+| `/btw <message>` | Send a message in the side conversation. Streams the response in a widget above the editor. Works asynchronously while the main agent is busy. |
 | `/btw:new [message]` | Start a fresh side thread. Optionally kick it off with a message. Clears the previous thread. |
 | `/btw:clear` | Dismiss the widget and clear the current thread. |
-| `/btw:inject [instructions]` | Inject the full btw thread into the main agent's context as a user message. Optionally add instructions like "implement this plan". Clears the widget after. |
-| `/btw:summarize [instructions]` | Summarize the btw thread via LLM, then inject the summary into the main agent's context. Lighter weight than full inject. Clears the widget after. |
+| `/btw:inject [instructions]` | Inject the full btw thread into the main agent's context as a user message. Optionally add instructions like "implement this plan". Queued as a follow-up if the agent is busy (delivered when it finishes). Clears the widget after. |
+| `/btw:summarize [instructions]` | Summarize the btw thread via LLM, then inject the summary into the main agent's context. Lighter weight than full inject. Queued as a follow-up if the agent is busy. Clears the widget after. |
+
+> **Note:** `/btw` side conversations work asynchronously — you can chat with the btw agent while the main agent is running. However, `/btw:inject` and `/btw:summarize` deliver their content as follow-up messages, which are queued until the main agent finishes its current turn.
 
 ## How it works
 

@@ -312,7 +312,7 @@ export default function (pi: ExtensionAPI) {
 	// ── Commands ─────────────────────────────────────────────────────
 
 	pi.registerCommand("btw", {
-		description: "Ask a side question using current context (doesn't affect main session)",
+		description: "Ask a side question using current context (works async while agent is busy)",
 		handler: async (args, ctx) => {
 			const question = args.trim();
 			if (!question) {
@@ -344,7 +344,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("btw:inject", {
-		description: "Inject btw thread into main agent context [optional instructions]",
+		description: "Inject btw thread into main agent context (queued as follow-up if busy) [optional instructions]",
 		handler: async (args, ctx) => {
 			const thread = collectBtwThread();
 			if (thread.length === 0 || slots.length === 0) {
@@ -365,7 +365,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("btw:summarize", {
-		description: "Summarize btw thread and inject into main agent context [optional instructions]",
+		description: "Summarize btw thread and inject into main agent (queued as follow-up if busy) [optional instructions]",
 		handler: async (args, ctx) => {
 			const thread = collectBtwThread();
 			if (thread.length === 0 || slots.length === 0) {
