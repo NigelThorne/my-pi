@@ -122,6 +122,21 @@ Use context management for:
 - Monitoring token usage
 - Compressing completed work to free context space
 
+### Side Conversations (`/btw`)
+
+Have a separate conversation with the LLM while the main agent is working. Works during streaming.
+
+- `/btw <message>` — Send a side message. Streams response in a widget above the editor.
+- `/btw:new [message]` — Start a fresh thread (optionally with a message).
+- `/btw:clear` — Dismiss widget and clear thread.
+- `/btw:inject [instructions]` — Inject full btw thread into main agent context.
+- `/btw:summarize [instructions]` — Summarize btw thread and inject summary into main agent context.
+
+Use btw for:
+- Asking clarifying questions while the agent works
+- Planning next steps without interrupting the current task
+- Thinking through ideas in a side channel
+
 ### Remote Access (`pi-remote`)
 
 Remote terminal access for pi via WebSocket with Tailscale integration. Connect to your pi session from mobile browsers over LAN or your tailnet.
@@ -138,3 +153,4 @@ Remote terminal access for pi via WebSocket with Tailscale integration. Connect 
 - Track multi-step work with **todo tools** — create todos at the start of complex tasks
 - Use **subagents** for delegation — scout first, then plan, then implement
 - Search the web with **brave-search** when you need current docs or information
+- Use **`/btw`** for side conversations — ask questions or plan ahead without interrupting the main task
