@@ -25,6 +25,7 @@ Delegate tasks to specialized subagents with isolated context windows.
 - `planner` (Opus 4.6) — Creates implementation plans from context
 - `reviewer` (Opus 4.6) — Code review for quality and security
 - `worker` (Opus 4.6) — General-purpose implementation with full tool access
+- `remover` (Sonnet 4.5) — Surgical code removal: deletes files, cleans imports/exports/references
 
 **Modes:**
 - Single: `{ agent: "scout", task: "find all auth code" }`
@@ -121,9 +122,19 @@ Use context management for:
 - Monitoring token usage
 - Compressing completed work to free context space
 
+### Remote Access (`pi-remote`)
+
+Remote terminal access for pi via WebSocket with Tailscale integration. Connect to your pi session from mobile browsers over LAN or your tailnet.
+
+- `/remote` — Restart pi in remote mode from within a running session
+- **QR code** — Scan to connect instantly from mobile
+- **Token auth** — All connections require token authentication
+- **Tailscale integration** — Automatically serves over HTTPS on your tailnet with a unique session subpath
+- **Discovery service** — Lists all active remote sessions at `/pi/`
+
 ## Workflow Preferences
 
-- Use **superpowers skills** when available (brainstorming, writing-plans, subagent-driven-development, test-driven-development, etc.)
+- Use **superpowers skills** when available (brainstorming, writing-plans, subagent-driven-development, branch-driven-development, test-driven-development, etc.)
 - Track multi-step work with **todo tools** — create todos at the start of complex tasks
 - Use **subagents** for delegation — scout first, then plan, then implement
 - Search the web with **brave-search** when you need current docs or information
