@@ -41,11 +41,18 @@ digraph when_to_use {
 - Each reviewer starts fresh (no anchoring to implementer's perspective)
 - Structured quality gates still enforced
 
-## Prerequisites
+## Prerequisites — CRITICAL
 
-**Before starting, the user must run `/acm` in pi** to enable Agentic Context Management from the pi-context extension. Without it, `context_checkout` will fail.
+**This skill REQUIRES Agentic Context Management (ACM) to be enabled.** Without it, `context_checkout` does not work, and the entire isolation model breaks — `context_tag` alone does NOT provide context isolation.
 
-If `context_checkout` returns an error saying "Agentic context management is not enabled", ask the user to run `/acm` and retry.
+**Before doing ANY work with this skill:**
+1. Attempt a `context_checkout` or check if ACM is active
+2. If you get the error "Agentic context management is not enabled", **STOP IMMEDIATELY**
+3. Ask the user to run `/acm` in pi
+4. **Do not proceed** until `context_checkout` is confirmed working
+5. Do not fall back to using only `context_tag` — that does not isolate context between roles
+
+If ACM is not enabled and the user cannot enable it, **use a different skill** (e.g., subagent-driven-development).
 
 ## The Process
 
