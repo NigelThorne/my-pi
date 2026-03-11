@@ -98,11 +98,13 @@ git commit -m "feat: add specific feature"
 
 After saving the plan, offer execution choice:
 
-**"Plan complete and saved to `docs/plans/<filename>.md`. Two execution options:**
+**"Plan complete and saved to `docs/plans/<filename>.md`. Three execution options:**
 
-**1. Subagent-Driven (this session)** - I dispatch fresh subagent per task, review between tasks, fast iteration
+**1. Subagent-Driven (this session)** - I dispatch fresh subagent per task, review between tasks, max isolation
 
-**2. Parallel Session (separate)** - Open new session with executing-plans, batch execution with checkpoints
+**2. Branch-Driven (this session)** - I role-switch with context branching per role, lighter weight, same quality gates
+
+**3. Parallel Session (separate)** - Open new session with executing-plans, batch execution with checkpoints
 
 **Which approach?"**
 
@@ -110,6 +112,12 @@ After saving the plan, offer execution choice:
 - **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development
 - Stay in this session
 - Fresh subagent per task + code review
+
+**If Branch-Driven chosen:**
+- **REQUIRED SUB-SKILL:** Use superpowers:branch-driven-development
+- Stay in this session
+- Context branching per role (implementer → spec review → quality review)
+- Lower cost than subagents, same two-stage review model
 
 **If Parallel Session chosen:**
 - Guide them to open new session in worktree

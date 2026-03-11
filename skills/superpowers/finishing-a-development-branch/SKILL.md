@@ -194,6 +194,7 @@ git worktree remove <worktree-path>
 
 **Called by:**
 - **subagent-driven-development** (Step 7) - After all tasks complete
+- **branch-driven-development** - After all tasks complete
 - **executing-plans** (Step 5) - After all batches complete
 
 **Pairs with:**
