@@ -75,13 +75,9 @@ Install npm dependencies for the code-ast extension:
 cd ~/.my-pi/extensions/code-ast && npm install
 ```
 
-## 7. Packages
+## 7. Packages & Submodules
 
-Install npm packages listed in settings.json:
-
-```bash
-pi install npm:pi-context
-```
+pi-context is included as a git submodule in `extensions/pi-context` (loaded automatically by the extensions folder).
 
 **[pi-context](https://github.com/ttttmr/pi-context)** - Git-like context management for AI agents:
 - `/context` - View token usage dashboard
