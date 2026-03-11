@@ -4,6 +4,7 @@ import { Text } from "@mariozechner/pi-tui";
 
 interface BtwDetails {
 	question: string;
+	thinking: string;
 	answer: string;
 	model: string;
 }
@@ -65,7 +66,7 @@ export default function (pi: ExtensionAPI) {
 				slots.push({
 					question: data.question,
 					model: data.model,
-					thinking: "",
+					thinking: data.thinking || "",
 					answer: data.answer,
 					done: true,
 				});
@@ -85,65 +86,47 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		const lines: string[] = [];
-		// Use ANSI escapes directly for string array mode (like pi-remote)
-		const dim = (s: string) => `\x1b[90m${s}\x1b[0m`;
-		const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-		const italic = (s: string) => `\x1b[3;90m${s}\x1b[0m`;
-		const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
+		ctx.ui.setWidget("btw", (_tui, theme) => {
+			const dim = (s: string) => theme.fg("dim", s);
+			const green = (s: string) => theme.fg("success", s);
+			const italic = (s: string) => theme.fg("dim", theme.italic(s));
+			const yellow = (s: string) => theme.fg("warning", s);
 
-		const title = " 💭 btw ";
-		const hint = " /btw:clear to dismiss ";
-		const pad = Math.max(0, 50 - title.length - hint.length);
-		lines.push(dim(`╭${title}${"─".repeat(pad)}${hint}╮`));
+			const parts: string[] = [];
 
-		for (let i = 0; i < slots.length; i++) {
-			const s = slots[i];
-			if (i > 0) lines.push(dim("│ ───"));
-			lines.push(dim("│ ") + green("› ") + s.question);
-			if (s.thinking) {
-				// Split thinking into lines so each gets the border
-				for (const tl of s.thinking.split("\n")) {
-					lines.push(dim("│ ") + italic(tl) + (!s.answer && !s.done ? yellow(" ▍") : ""));
+			const title = " 💭 btw ";
+			const hint = " /btw:clear to dismiss ";
+			const pad = Math.max(0, 50 - title.length - hint.length);
+			parts.push(dim(`╭${title}${"─".repeat(pad)}${hint}╮`));
+
+			for (let i = 0; i < slots.length; i++) {
+				const s = slots[i];
+				if (i > 0) parts.push(dim("│ ───"));
+				parts.push(dim("│ ") + green("› ") + s.question);
+				if (s.thinking) {
+					const cursor = !s.answer && !s.done ? yellow(" ▍") : "";
+					parts.push(dim("│ ") + italic(s.thinking) + cursor);
+				}
+				if (s.answer) {
+					const answerLines = s.answer.split("\n");
+					parts.push(dim("│ ") + answerLines[0]);
+					if (answerLines.length > 1) {
+						parts.push(answerLines.slice(1).join("\n"));
+					}
+					if (!s.done) parts[parts.length - 1] += yellow(" ▍");
+				} else if (!s.thinking && !s.done) {
+					parts.push(dim("│ ") + yellow("⏳ thinking..."));
 				}
 			}
-			if (s.answer) {
-				for (const al of s.answer.split("\n")) {
-					lines.push(dim("│ ") + al);
-				}
-				if (!s.done) lines[lines.length - 1] += yellow(" ▍");
-			} else if (!s.thinking && !s.done) {
-				lines.push(dim("│ ") + yellow("⏳ thinking..."));
+
+			if (widgetStatus) {
+				parts.push(dim("│ ") + yellow(widgetStatus));
 			}
-		}
 
-		if (widgetStatus) {
-			lines.push(dim("│ ") + yellow(widgetStatus));
-		}
+			parts.push(dim(`╰${"─".repeat(50)}╯`));
 
-		lines.push(dim(`╰${"─".repeat(50)}╯`));
-
-		// Remove empty content lines (e.g. gap between user message and answer when no thinking)
-		const filtered = [lines[0], ...lines.slice(1, -1).filter((l) => l !== dim("│ ") && l !== dim("│") + " "), lines[lines.length - 1]];
-		lines.length = 0;
-		lines.push(...filtered);
-
-		// Pi caps widgets at 10 lines — keep last content lines + borders
-		const maxLines = 10;
-		if (lines.length > maxLines) {
-			const top = lines[0];
-			const bot = lines[lines.length - 1];
-			const content = lines.slice(1, -1);
-			const keep = maxLines - 3; // top + "hidden" + bot = 3
-			const truncated = content.slice(-keep);
-			lines.length = 0;
-			lines.push(top);
-			lines.push(dim("│ ") + dim(`… ${content.length - truncated.length} lines above …`));
-			lines.push(...truncated);
-			lines.push(bot);
-		}
-
-		ctx.ui.setWidget("btw", lines, { placement: "aboveEditor" });
+			return new Text(parts.join("\n"), 0, 0);
+		}, { placement: "aboveEditor" });
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────
@@ -310,7 +293,7 @@ export default function (pi: ExtensionAPI) {
 				slot.done = true;
 				renderWidget(ctx);
 
-				const details = { question, answer: slot.answer, model: modelLabel } satisfies BtwDetails;
+				const details = { question, thinking: slot.thinking, answer: slot.answer, model: modelLabel } satisfies BtwDetails;
 				pendingBtwThread.push(details);
 
 				// Persist in session (hidden from TUI, filtered from agent context)
