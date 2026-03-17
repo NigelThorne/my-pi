@@ -23,13 +23,21 @@ mkdir -p ~/.pi/agent/agents
 cp ~/.my-pi/agents/*.md ~/.pi/agent/agents/
 ```
 
-## 3. Skills
+## 3. Web Tools Extension
 
-Install dependencies for the bundled skills (brave-search + browser-tools):
+Install dependencies for the web-tools extension (preferred for web search and fetching — no API key needed):
 
 ```bash
-cd ~/.my-pi/skills/brave-search && npm install
+cd ~/.my-pi/extensions/web-tools && npm install
+```
+
+## 4. Skills
+
+Install dependencies for the bundled skills:
+
+```bash
 cd ~/.my-pi/skills/browser-tools && npm install
+cd ~/.my-pi/skills/brave-search && npm install   # optional legacy fallback
 ```
 
 ### Browser (for browser-tools)
@@ -49,25 +57,27 @@ sudo snap install chromium
 
 The `browser-start.js` script auto-detects Chrome or Chromium on both macOS and Linux. On headless Linux (no DISPLAY), it runs in headless mode automatically.
 
-## 4. Environment Variables
+## 5. Environment Variables (optional)
 
-Check if `BRAVE_API_KEY` is set:
+Only needed if using the legacy brave-search skill. Check if `BRAVE_API_KEY` is set:
 
 ```bash
 echo $BRAVE_API_KEY
 ```
 
-If not set, ask the user for their key and add it to `~/.profile`:
+If not set and the user wants brave-search, ask for their key and add it to `~/.profile`:
 
 ```bash
 export BRAVE_API_KEY="<key>"
 ```
 
-## 5. Superpowers
+> **Note:** The `websearch` and `webfetch` tools require no API keys — they are the preferred web access tools.
+
+## 6. Superpowers
 
 [Superpowers](https://github.com/obra/superpowers) skills are bundled in `~/.my-pi/skills/`. No separate installation needed — they're loaded automatically via the skills path in settings.
 
-## 6. Extension Dependencies
+## 7. Extension Dependencies
 
 Install npm dependencies for the code-ast extension:
 
@@ -75,7 +85,7 @@ Install npm dependencies for the code-ast extension:
 cd ~/.my-pi/extensions/code-ast && npm install
 ```
 
-## 7. Packages & Submodules
+## 8. Packages & Submodules
 
 pi-context is included as a git submodule in `extensions/pi-context` (loaded automatically by the extensions folder).
 
@@ -83,7 +93,7 @@ pi-context is included as a git submodule in `extensions/pi-context` (loaded aut
 - `/context` - View token usage dashboard
 - `/skill:context-management` - Enable the workflow with tools: `context_tag`, `context_log`, `context_checkout`
 
-## 8. pi-remote (submodule)
+## 9. pi-remote (submodule)
 
 The pi-remote package is included as a git submodule with Tailscale integration. Initialize and build it:
 
@@ -97,6 +107,6 @@ This fork automatically runs `tailscale serve` when starting a remote session, e
 
 Requires Tailscale to be installed and running on the machine.
 
-## 9. Verify
+## 10. Verify
 
 Run `pi -p "list all available tools"` to confirm everything loaded.

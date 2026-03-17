@@ -40,14 +40,24 @@ Use subagents for:
 - Code review after completing work
 - Parallel investigation of unrelated problems
 
+### Web Tools (`webfetch`, `websearch`)
+
+Search the web and fetch page content. These are the **preferred** tools for web access — use them instead of brave-search.
+
+- `websearch` — Search the web via Exa AI (no API key required). Use for discovery, finding docs, current events.
+- `webfetch` — Fetch a URL and return content as markdown, text, or HTML. Use for retrieving specific pages.
+
+Use `websearch` when you need to find information (discovery), and `webfetch` when you need to retrieve content from a specific URL (retrieval).
+
 ## Skills
 
 ### Web Search (`/skill:brave-search`)
 
-Search the web and extract page content. Use when you need current information, documentation, or facts.
+**Legacy** — prefer the `websearch` and `webfetch` tools above. Only use brave-search as a fallback if the web tools are unavailable.
+
+Search the web and extract page content via Brave Search API.
 
 ```bash
-# These scripts are in the skill directory — read the skill for full usage
 search.js "query"                    # Basic search
 search.js "query" --content          # Include page content
 content.js https://example.com       # Extract page content
@@ -152,5 +162,5 @@ Remote terminal access for pi via WebSocket with Tailscale integration. Connect 
 - Use **superpowers skills** when available (brainstorming, writing-plans, subagent-driven-development, branch-driven-development, test-driven-development, etc.)
 - Track multi-step work with **todo tools** — create todos at the start of complex tasks
 - Use **subagents** for delegation — scout first, then plan, then implement
-- Search the web with **brave-search** when you need current docs or information
+- Search the web with **`websearch`** and fetch pages with **`webfetch`** — prefer these over brave-search
 - Use **`/btw`** for side conversations — ask questions or plan ahead without interrupting the main task

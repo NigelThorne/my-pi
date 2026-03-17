@@ -42,24 +42,35 @@ mkdir -p ~/.pi/agent/agents
 cp ~/.my-pi/agents/*.md ~/.pi/agent/agents/
 ```
 
-#### 4. Skills (web search + browser)
+#### 4. Extension Dependencies
+
+Install dependencies for extensions that need them:
+
+```bash
+cd ~/.my-pi/extensions/web-tools && npm install
+cd ~/.my-pi/extensions/code-ast && npm install
+```
+
+#### 5. Skills (browser + legacy search)
 
 Install dependencies for the bundled skills:
 
 ```bash
-cd ~/.my-pi/skills/brave-search && npm install
 cd ~/.my-pi/skills/browser-tools && npm install
+cd ~/.my-pi/skills/brave-search && npm install   # optional — legacy fallback
 ```
 
-#### 5. Environment Variables
+#### 6. Environment Variables (optional)
 
-Add to your shell profile (`~/.profile`, `~/.bashrc`, or `~/.zshrc`):
+Only needed if you use the legacy brave-search skill. Add to your shell profile (`~/.profile`, `~/.bashrc`, or `~/.zshrc`):
 
 ```bash
 export BRAVE_API_KEY="your-brave-api-key"
 ```
 
 Get a free Brave Search API key at https://api-dashboard.search.brave.com/register (requires a "Free AI" subscription).
+
+> **Note:** The `websearch` and `webfetch` tools (in `extensions/web-tools/`) require **no API keys** and are the preferred way to search the web and fetch pages.
 
 #### 6. Superpowers Skills
 
@@ -148,6 +159,18 @@ Features:
 - `ast_symbols` lists functions, classes, interfaces, types, enums with export status
 - Requires `typescript` npm package (installed in `code-ast/node_modules/`)
 
+### web-tools/
+
+Web search and content fetching — the **preferred** tools for web access (replaces brave-search for most use cases).
+
+**Tools:** `webfetch`, `websearch`
+
+Features:
+- `websearch` — Search the web via Exa AI's free MCP endpoint (no API key required). Supports search types (`auto`, `fast`, `deep`), live crawl modes, and configurable result counts.
+- `webfetch` — Fetch any URL and return content as markdown (default), text, or HTML. Uses Readability + Turndown for clean article extraction. Handles Cloudflare bot detection, configurable timeout (max 120s), 5MB size limit.
+- Custom TUI rendering for both tools
+- Output truncation to prevent context overflow
+
 ### antigravity-image-gen.ts
 
 Image generation via Google Antigravity (gemini-3-pro-image, imagen-3).
@@ -179,7 +202,7 @@ Bundled in `skills/` (browser/search from [badlogic/pi-skills](https://github.co
 
 | Skill | Description | Requires |
 |-------|-------------|----------|
-| **brave-search** | Web search + page content extraction | `BRAVE_API_KEY` |
+| **brave-search** | Web search + page content extraction (legacy — prefer `websearch`/`webfetch` tools) | `BRAVE_API_KEY` |
 | **browser-tools** | Browser automation via Chrome DevTools Protocol | Chrome |
 | **brainstorming** | Explores intent, requirements and design before creative work | — |
 | **dispatching-parallel-agents** | Run 2+ independent tasks in parallel | — |
