@@ -11,6 +11,7 @@
     "~/.claude/skills"
   ],
   "packages": [
-    "~/.my-pi/extensions/pi-remote/packages/remote"
+    "~/.my-pi/extensions/pi-remote/packages/remote",
+    "~/.my-pi/extensions/pi-interactive-subagents"
   ]
 }

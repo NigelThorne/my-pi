@@ -407,14 +407,15 @@ const SubagentParams = Type.Object({
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "subagent",
-		label: "Subagent",
+		name: "subagent_sync",
+		label: "Subagent (Synchronous/Blocking)",
 		description: [
-			"Delegate tasks to specialized subagents with isolated context.",
+			"Delegate tasks to specialized subagents with isolated context. This is a synchronous (blocking) version of the subagent tool.",
+			"This will block the main thread until the subagent(s) complete.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
 			'Default agent scope is "user" (from ~/.pi/agent/agents).',
 			'To enable project-local agents in .pi/agents, set agentScope: "both" (or "project").',
-		].join(" "),
+		].join("\n"),
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {

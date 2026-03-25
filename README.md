@@ -92,26 +92,32 @@ Features:
 - State persists across session branches/forks
 - Interactive TUI view via `/todos`
 
-### subagent/
+### pi-interactive-subagents/ (package)
 
-Delegate tasks to specialized subagents with isolated context windows. From pi's [built-in example](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent/examples/extensions/subagent).
+Async subagent orchestration in multiplexer panes. From [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents). Included as a git submodule loaded as a pi package.
 
-**Tool:** `subagent` (single, parallel, or chained execution)
-**Prompts:** `/implement`, `/scout-and-plan`, `/implement-and-review`
+**Tools:** `subagent`, `subagents_list`, `set_tab_title`, `subagent_resume`, `write_artifact`, `read_artifact`
+**Commands:** `/plan`, `/iterate`, `/subagent <agent> <task>`
 
 | Agent | Purpose | Model |
 |-------|---------|-------|
 | `scout` | Fast codebase recon | Haiku 4.5 |
-| `planner` | Implementation plans | Opus 4.6 |
-| `reviewer` | Code review | Opus 4.6 |
-| `worker` | General-purpose | Opus 4.6 |
+| `planner` | Brainstorming & planning | Opus (medium thinking) |
+| `worker` | Implementation | Sonnet |
+| `reviewer` | Code review | Opus (medium thinking) |
+| `visual-tester` | Visual QA via Chrome CDP | Sonnet |
 
 Features:
-- Each subagent runs in an isolated `pi` process (no context pollution)
-- Parallel execution (up to 8 tasks, 4 concurrent)
-- Chaining with `{previous}` placeholder for sequential pipelines
-- Streaming output with live progress
-- Works with superpowers' subagent-driven-development skill
+- **Fully async** — `subagent()` returns immediately, sub-agent runs in a dedicated mux pane
+- Live widget shows all running agents with elapsed time and progress
+- Results steered back as async notifications when complete
+- Multiple subagents run concurrently
+- `/plan` — Full planning-to-implementation pipeline (investigate → plan → execute → review)
+- `/iterate` — Fork current session into a subagent for quick focused fixes
+- Session artifacts (`write_artifact`/`read_artifact`) for plans, context, and notes
+- Agent access control via `spawning: false` and `deny-tools` frontmatter
+- Role folders with per-agent `cwd` and config
+- Requires a terminal multiplexer (cmux, tmux, or zellij)
 
 ### clipboard.ts
 
@@ -242,6 +248,7 @@ External pi packages:
 | Package | Source | Description |
 |---------|--------|-------------|
 | [pi-context](https://github.com/ttttmr/pi-context) | git submodule | Git-like context management (`/context`, `context_tag`, etc.) |
+| [pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents) | git submodule | Async subagent orchestration in multiplexer panes (`/plan`, `/iterate`, `subagent`) |
 | [pi-remote](https://github.com/noahsaso/pi-remote) | git submodule | Remote terminal access via WebSocket and browser, with Tailscale integration |
 
 ### pi-remote (fork with Tailscale)

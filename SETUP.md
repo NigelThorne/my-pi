@@ -93,7 +93,30 @@ pi-context is included as a git submodule in `extensions/pi-context` (loaded aut
 - `/context` - View token usage dashboard
 - `/skill:context-management` - Enable the workflow with tools: `context_tag`, `context_log`, `context_checkout`
 
-## 9. pi-remote (submodule)
+## 9. pi-interactive-subagents (submodule)
+
+The pi-interactive-subagents package provides async subagent orchestration in multiplexer panes. It's included as a git submodule:
+
+```bash
+cd ~/.my-pi
+git submodule update --init --recursive
+```
+
+No build step needed — it's loaded directly as a pi package via `settings.json`.
+
+Requires a terminal multiplexer. Start pi inside one:
+
+```bash
+cmux pi
+# or
+tmux new -A -s pi 'pi'
+# or
+zellij --session pi   # then run: pi
+```
+
+Optionally force a backend: `export PI_SUBAGENT_MUX=cmux|tmux|zellij`
+
+## 10. pi-remote (submodule)
 
 The pi-remote package is included as a git submodule with Tailscale integration. Initialize and build it:
 
@@ -107,6 +130,6 @@ This fork automatically runs `tailscale serve` when starting a remote session, e
 
 Requires Tailscale to be installed and running on the machine.
 
-## 10. Verify
+## 11. Verify
 
 Run `pi -p "list all available tools"` to confirm everything loaded.

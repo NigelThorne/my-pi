@@ -16,29 +16,35 @@ Use these tools to track work items during complex tasks. They support dependenc
 
 Use todos proactively when working on multi-step tasks, implementation plans, or any work with natural ordering.
 
-### Subagents (`subagent`)
+### Interactive Subagents (`subagent`, `subagents_list`, `subagent_resume`, `set_tab_title`)
 
-Delegate tasks to specialized subagents with isolated context windows.
+Spawn async subagents in dedicated multiplexer panes. Fully non-blocking — the main agent keeps working while subagents run in the background. Results steer back automatically when complete.
 
 **Available agents:**
-- `scout` (Sonnet 4.6) — Fast codebase recon, returns structured findings for handoff
-- `planner` (Opus 4.6) — Creates implementation plans from context
-- `reviewer` (Opus 4.6) — Code review for quality and security
-- `worker` (Opus 4.6) — General-purpose implementation with full tool access
-- `remover` (Sonnet 4.5) — Surgical code removal: deletes files, cleans imports/exports/references
+- `scout` (Haiku 4.5) — Fast codebase recon, returns structured findings for handoff
+- `planner` (Opus, medium thinking) — Brainstorming, clarifies requirements, writes plans, creates todos
+- `worker` (Sonnet) — Implements tasks from todos, writes code, runs tests
+- `reviewer` (Opus, medium thinking) — Code review for bugs, security, correctness
+- `visual-tester` (Sonnet) — Visual QA via Chrome CDP, screenshots, responsive testing
 
-**Modes:**
-- Single: `{ agent: "scout", task: "find all auth code" }`
-- Parallel: `{ tasks: [{ agent: "scout", task: "..." }, ...] }` (up to 8 tasks, 4 concurrent)
-- Chain: `{ chain: [{ agent: "scout", task: "..." }, { agent: "planner", task: "Based on: {previous}" }] }`
+**Tools:**
+- `subagent` — Spawn a sub-agent in a mux pane (returns immediately)
+- `subagents_list` — List available agent definitions
+- `subagent_resume` — Resume a previous sub-agent session
+- `set_tab_title` — Update tab/window title to show progress
 
-**Workflow prompts:** `/implement`, `/scout-and-plan`, `/implement-and-review`
+**Session Artifacts:**
+- `write_artifact` — Write plans, context, notes to session-scoped directory
+- `read_artifact` — Read artifacts from current or previous sessions
+
+**Commands:** `/plan`, `/iterate`, `/subagent <agent> <task>`
 
 Use subagents for:
 - Scouting unfamiliar codebases before planning
 - Delegating independent implementation tasks
 - Code review after completing work
-- Parallel investigation of unrelated problems
+- Parallel investigation (call `subagent` multiple times — they run concurrently)
+- Full planning pipelines via `/plan`
 
 ### Web Tools (`webfetch`, `websearch`)
 
