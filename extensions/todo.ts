@@ -19,7 +19,7 @@
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
 import { matchesKey, Text, truncateToWidth } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 // --- Types ---
 
@@ -199,8 +199,6 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
-	pi.on("session_switch", async (_event, ctx) => reconstructState(ctx));
-	pi.on("session_fork", async (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
 
 	const makeState = (): TodoState => ({ items: items.map((it) => ({ ...it, depends: [...it.depends] })) });
@@ -305,7 +303,6 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Invalid index ${params.index}. There are ${items.length} items.` }],
 					details: makeState(),
-					isError: true,
 				};
 			}
 
@@ -316,7 +313,6 @@ export default function (pi: ExtensionAPI) {
 					return {
 						content: [{ type: "text", text: `Cannot complete item ${params.index}: blocked by unfinished dependencies: ${unmetTexts}` }],
 						details: makeState(),
-						isError: true,
 					};
 				}
 			}
@@ -337,8 +333,8 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 
-		renderResult(result, _opts, theme) {
-			if (result.isError) {
+		renderResult(result, _opts, theme, context) {
+			if (context.isError) {
 				const text = result.content[0];
 				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
 			}
@@ -360,7 +356,6 @@ export default function (pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Invalid index ${params.index}. There are ${items.length} items.` }],
 					details: makeState(),
-					isError: true,
 				};
 			}
 
@@ -386,8 +381,8 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 
-		renderResult(result, _opts, theme) {
-			if (result.isError) {
+		renderResult(result, _opts, theme, context) {
+			if (context.isError) {
 				const text = result.content[0];
 				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
 			}

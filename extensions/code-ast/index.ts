@@ -17,7 +17,7 @@ import {
   DEFAULT_MAX_LINES,
   formatSize,
 } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { Text } from "@mariozechner/pi-tui";
 import ts from "typescript";
 import { resolve, dirname, relative, extname } from "node:path";
@@ -503,7 +503,6 @@ export default function (pi: ExtensionAPI) {
       if (!existsSync(filePath)) {
         return {
           content: [{ type: "text", text: `File not found: ${filePath}` }],
-          isError: true,
           details: { refs: [], error: true },
         };
       }
@@ -565,7 +564,6 @@ export default function (pi: ExtensionAPI) {
       if (!existsSync(filePath)) {
         return {
           content: [{ type: "text", text: `File not found: ${filePath}` }],
-          isError: true,
           details: { modified: [], error: true },
         };
       }
@@ -648,7 +646,6 @@ export default function (pi: ExtensionAPI) {
       if (!existsSync(filePath)) {
         return {
           content: [{ type: "text", text: `File not found: ${filePath}` }],
-          isError: true,
           details: { symbols: [], error: true },
         };
       }

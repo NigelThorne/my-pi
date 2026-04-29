@@ -16,7 +16,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { Text } from "@mariozechner/pi-tui";
 import { spawn, execSync } from "node:child_process";
 import { join } from "node:path";
@@ -202,7 +202,7 @@ export default function (pi: ExtensionAPI) {
     },
 
     renderResult(result, _options, theme) {
-      const answer = result.details?.answer;
+      const answer = (result.details as { answer?: string | null } | undefined)?.answer;
       if (answer === null || answer === undefined) {
         return new Text(theme.fg("warning", "⚠ User dismissed prompt"), 0, 0);
       }

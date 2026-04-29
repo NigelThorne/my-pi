@@ -12,7 +12,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
@@ -71,9 +71,9 @@ function extractTextFromHtml(html: string): string {
 }
 
 function truncateOutput(text: string): string {
-	const truncated = truncateHead(text, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
-	if (truncated.length < text.length) {
-		return truncated + `\n\n[Output truncated: showing ${formatSize(truncated.length)} of ${formatSize(text.length)}]`;
+	const truncation = truncateHead(text, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+	if (truncation.truncated) {
+		return truncation.content + `\n\n[Output truncated: showing ${formatSize(Buffer.byteLength(truncation.content, "utf-8"))} of ${formatSize(Buffer.byteLength(text, "utf-8"))}]`;
 	}
 	return text;
 }
@@ -112,10 +112,7 @@ export default function (pi: ExtensionAPI) {
 
 			// Validate URL
 			if (!url.startsWith("http://") && !url.startsWith("https://")) {
-				return {
-					content: [{ type: "text", text: "Error: URL must start with http:// or https://" }],
-					isError: true,
-				};
+				throw new Error("URL must start with http:// or https://");
 			}
 
 			const timeout = Math.min((params.timeout ?? 30) * 1000, MAX_TIMEOUT);
@@ -169,27 +166,18 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				if (!response.ok) {
-					return {
-						content: [{ type: "text", text: `Error: HTTP ${response.status} ${response.statusText}` }],
-						isError: true,
-					};
+					throw new Error(`HTTP ${response.status} ${response.statusText}`);
 				}
 
 				// Check content size
 				const contentLength = response.headers.get("content-length");
 				if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
-					return {
-						content: [{ type: "text", text: "Error: Response too large (exceeds 5MB limit)" }],
-						isError: true,
-					};
+					throw new Error("Response too large (exceeds 5MB limit)");
 				}
 
 				const arrayBuffer = await response.arrayBuffer();
 				if (arrayBuffer.byteLength > MAX_RESPONSE_SIZE) {
-					return {
-						content: [{ type: "text", text: "Error: Response too large (exceeds 5MB limit)" }],
-						isError: true,
-					};
+					throw new Error("Response too large (exceeds 5MB limit)");
 				}
 
 				const contentType = response.headers.get("content-type") || "";
@@ -234,10 +222,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			} catch (err: any) {
 				const msg = err.name === "AbortError" ? "Request timed out" : err.message;
-				return {
-					content: [{ type: "text", text: `Error: ${msg}` }],
-					isError: true,
-				};
+				throw new Error(msg);
 			}
 		},
 
@@ -252,8 +237,8 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 
-		renderResult(result: any, _opts: any, theme: any) {
-			if (result.isError) {
+		renderResult(result: any, _opts: any, theme: any, context: any) {
+			if (context.isError) {
 				const text = result.content?.[0];
 				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
 			}
@@ -351,10 +336,7 @@ export default function (pi: ExtensionAPI) {
 
 				if (!response.ok) {
 					const errorText = await response.text();
-					return {
-						content: [{ type: "text", text: `Search error (HTTP ${response.status}): ${errorText}` }],
-						isError: true,
-					};
+					throw new Error(`Search error (HTTP ${response.status}): ${errorText}`);
 				}
 
 				const responseText = await response.text();
@@ -390,15 +372,12 @@ export default function (pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: "No search results found. Try a different query." }],
-					details: { query: params.query },
+					details: { query: params.query, numResults: params.numResults || DEFAULT_NUM_RESULTS },
 				};
 			} catch (err: any) {
 				clearTimeout(timeoutId);
 				const msg = err.name === "AbortError" ? "Search request timed out" : err.message;
-				return {
-					content: [{ type: "text", text: `Error: ${msg}` }],
-					isError: true,
-				};
+				throw new Error(msg);
 			}
 		},
 
@@ -413,8 +392,8 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 
-		renderResult(result: any, _opts: any, theme: any) {
-			if (result.isError) {
+		renderResult(result: any, _opts: any, theme: any, context: any) {
+			if (context.isError) {
 				const text = result.content?.[0];
 				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
 			}
