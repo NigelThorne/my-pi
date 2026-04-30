@@ -2,7 +2,7 @@
 name: reviewer
 description: Code review specialist for quality and security analysis
 tools: read, grep, find, ls, bash
-model: claude-opus-4-6
+model: openai-codex/gpt-5.5
 auto-exit: true
 ---
 

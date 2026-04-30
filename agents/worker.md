@@ -1,7 +1,7 @@
 ---
 name: worker
 description: General-purpose subagent with full capabilities, isolated context
-model: claude-opus-4-6
+model: openai-codex/gpt-5.5
 auto-exit: true
 ---
 

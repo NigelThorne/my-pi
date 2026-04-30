@@ -1,7 +1,7 @@
 ---
 name: remover
 description: Surgical code removal agent - deletes files and removes imports/exports/references
-model: claude-sonnet-4-5
+model: openai-codex/gpt-5.5
 auto-exit: true
 ---
 
