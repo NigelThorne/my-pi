@@ -5,7 +5,7 @@
  *   todo_list   — Show all items with status, dependencies, blocked info
  *   todo_add    — Add one or more items, optionally with dependencies
  *   todo_toggle — Toggle completion (blocks if unmet dependencies)
- *   todo_remove — Remove an item (rewrites dependency indices)
+ *   todo_remove — Remove one or more items by index, indices, and/or range (rewrites dependency indices)
  *
  * Command:
  *   /todos      — Interactive TUI view of the todo list
@@ -95,7 +95,9 @@ const TodoToggleParams = Type.Object({
 });
 
 const TodoRemoveParams = Type.Object({
-	index: Type.Number({ description: "One-based index of the item to remove" }),
+	index: Type.Optional(Type.Number({ description: "One-based index of a single item to remove." })),
+	indices: Type.Optional(Type.Array(Type.Number(), { description: "One-based indices of items to remove." })),
+	range: Type.Optional(Type.String({ description: "Inclusive one-based range of items to remove, e.g. '1-10'." })),
 });
 
 // --- TUI Component for /todos ---
@@ -343,42 +345,73 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	const parseRemoveRange = (range: string): number[] | string => {
+		const match = range.trim().match(/^(\d+)\s*-\s*(\d+)$/);
+		if (!match) return `Invalid range "${range}". Use a format like "1-10".`;
+		const start = parseInt(match[1], 10);
+		const end = parseInt(match[2], 10);
+		const low = Math.min(start, end);
+		const high = Math.max(start, end);
+		return Array.from({ length: high - low + 1 }, (_v, i) => low + i);
+	};
+
+	const getRemoveIndices = (params: { index?: number; indices?: number[]; range?: string }): number[] | string => {
+		const requested: number[] = [];
+		if (typeof params.index === "number") requested.push(params.index);
+		if (params.indices) requested.push(...params.indices);
+		if (params.range) {
+			const parsed = parseRemoveRange(params.range);
+			if (typeof parsed === "string") return parsed;
+			requested.push(...parsed);
+		}
+		if (requested.length === 0) return "No indices specified. Provide index, indices, and/or range.";
+
+		const unique = [...new Set(requested)].sort((a, b) => a - b);
+		const invalid = unique.filter((n) => !Number.isInteger(n) || n < 1 || n > items.length);
+		if (invalid.length > 0) return `Invalid index/indices ${invalid.join(", ")}. There are ${items.length} items.`;
+		return unique;
+	};
+
 	// --- todo_remove ---
 	pi.registerTool({
 		name: "todo_remove",
 		label: "Remove Todo",
-		description: "Remove a todo item by one-based index. Dependency indices are automatically adjusted.",
+		description: "Remove one or more todo items by one-based index, explicit indices, and/or inclusive range. Dependency indices are automatically adjusted.",
 		parameters: TodoRemoveParams,
 
-		async execute(_toolCallId, params: { index: number }) {
-			const idx = params.index - 1;
-			if (idx < 0 || idx >= items.length) {
+		async execute(_toolCallId, params: { index?: number; indices?: number[]; range?: string }) {
+			const removeIndices = getRemoveIndices(params);
+			if (typeof removeIndices === "string") {
 				return {
-					content: [{ type: "text", text: `Invalid index ${params.index}. There are ${items.length} items.` }],
+					content: [{ type: "text", text: removeIndices }],
 					details: makeState(),
 				};
 			}
 
-			const removed = items.splice(idx, 1)[0];
-			const removedIndex = params.index; // one-based
+			const removeSet = new Set(removeIndices);
+			const removed = removeIndices.map((idx) => ({ index: idx, text: items[idx - 1].text }));
+			items = items.filter((_item, i) => !removeSet.has(i + 1));
+
 			for (const item of items) {
 				item.depends = item.depends
-					.filter((d) => d !== removedIndex)
-					.map((d) => (d > removedIndex ? d - 1 : d));
+					.filter((d) => !removeSet.has(d))
+					.map((d) => d - removeIndices.filter((removedIndex) => removedIndex < d).length);
 			}
 
+			const removedText = removed.map((item) => `${item.index}. "${item.text}"`).join(", ");
+			const prefix = removed.length === 1 ? "Removed 1 item" : `Removed ${removed.length} item(s)`;
 			return {
-				content: [{ type: "text", text: `Removed item ${params.index}: "${removed.text}". ${items.length} remaining.` }],
+				content: [{ type: "text", text: `${prefix}: ${removedText}. ${items.length} remaining.` }],
 				details: makeState(),
 			};
 		},
 
 		renderCall(args, theme) {
-			return new Text(
-				theme.fg("toolTitle", theme.bold("todo_remove ")) + theme.fg("accent", `#${args.index}`),
-				0,
-				0,
-			);
+			const parts: string[] = [];
+			if (args.index !== undefined) parts.push(`#${args.index}`);
+			if (args.indices?.length) parts.push(`#${args.indices.join(", #")}`);
+			if (args.range) parts.push(args.range);
+			return new Text(theme.fg("toolTitle", theme.bold("todo_remove ")) + theme.fg("accent", parts.join(", ")), 0, 0);
 		},
 
 		renderResult(result, _opts, theme, context) {
