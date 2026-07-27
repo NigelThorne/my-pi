@@ -32,7 +32,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { type Static, Type } from "@sinclair/typebox";
+import { type Static, Type } from "typebox";
 
 const PROVIDER = "google-antigravity";
 

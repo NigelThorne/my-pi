@@ -248,6 +248,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const thinkingLevel = pi.getThinkingLevel();
+		const reasoning = thinkingLevel === "off" ? undefined : thinkingLevel;
 		const modelLabel = `${model.provider}/${model.id}`;
 		const allMessages = buildBtwMessages(ctx, model, question);
 
@@ -259,8 +260,8 @@ export default function (pi: ExtensionAPI) {
 		(async () => {
 			try {
 				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-				if (!auth.ok || !auth.apiKey) {
-					slot.answer = `❌ ${auth.ok ? "No API key" : auth.error}`;
+				if (!auth.ok) {
+					slot.answer = `❌ ${auth.error}`;
 					slot.done = true;
 					renderWidget(ctx);
 					return;
@@ -272,7 +273,7 @@ export default function (pi: ExtensionAPI) {
 						systemPrompt: "You are having an aside conversation with the user, separate from their main working session. The main session messages are provided for context only — that work is being handled by another agent. Focus on answering the user's side questions, helping them think through ideas, or planning next steps. Do not act as if you need to complete or continue the main session's work.",
 						messages: allMessages,
 					},
-					{ apiKey: auth.apiKey, headers: auth.headers, env: auth.env, reasoning: thinkingLevel }
+					{ apiKey: auth.apiKey, headers: auth.headers, env: auth.env, reasoning }
 				);
 
 				for await (const event of eventStream) {
@@ -283,7 +284,7 @@ export default function (pi: ExtensionAPI) {
 						slot.answer += event.delta;
 						renderWidget(ctx);
 					} else if (event.type === "error") {
-						slot.answer += `\n❌ ${event.error.message}`;
+						slot.answer += `\n❌ ${event.error.errorMessage ?? "Model request failed"}`;
 						slot.done = true;
 						renderWidget(ctx);
 						return;
@@ -380,8 +381,8 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok || !auth.apiKey) {
-				ctx.ui.notify(auth.ok ? `No API key for ${model.provider}/${model.id}` : auth.error, "error");
+			if (!auth.ok) {
+				ctx.ui.notify(auth.error, "error");
 				return;
 			}
 

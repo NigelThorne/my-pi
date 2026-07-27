@@ -12,7 +12,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { watch, type FSWatcher } from "node:fs";
@@ -190,10 +190,7 @@ export default function (pi: ExtensionAPI) {
 					details: { id, path: watchPath, recursive, pattern },
 				};
 			} catch (err: any) {
-				return {
-					content: [{ type: "text", text: `Failed to start watcher: ${err.message}` }],
-					isError: true,
-				};
+				throw new Error(`Failed to start watcher: ${err.message}`);
 			}
 		},
 
@@ -204,8 +201,8 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(result, _options, theme) {
-			if (result.isError) {
+		renderResult(result, _options, theme, context) {
+			if (context.isError) {
 				const msg = result.content[0];
 				return new Text(theme.fg("error", msg?.type === "text" ? msg.text : "Error"), 0, 0);
 			}
@@ -233,10 +230,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const entry = watchers.get(params.id);
 			if (!entry) {
-				return {
-					content: [{ type: "text", text: `Watcher #${params.id} not found` }],
-					isError: true,
-				};
+				throw new Error(`Watcher #${params.id} not found`);
 			}
 
 			const path = entry.path;
@@ -254,8 +248,8 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(result, _options, theme) {
-			if (result.isError) {
+		renderResult(result, _options, theme, context) {
+			if (context.isError) {
 				const msg = result.content[0];
 				return new Text(theme.fg("error", msg?.type === "text" ? msg.text : "Error"), 0, 0);
 			}
@@ -370,10 +364,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const entry = watchers.get(params.id);
 			if (!entry) {
-				return {
-					content: [{ type: "text", text: `Watcher #${params.id} not found` }],
-					isError: true,
-				};
+				throw new Error(`Watcher #${params.id} not found`);
 			}
 
 			const events = [...entry.events];
@@ -410,8 +401,8 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(result, { expanded }, theme) {
-			if (result.isError) {
+		renderResult(result, { expanded }, theme, context) {
+			if (context.isError) {
 				const msg = result.content[0];
 				return new Text(theme.fg("error", msg?.type === "text" ? msg.text : "Error"), 0, 0);
 			}

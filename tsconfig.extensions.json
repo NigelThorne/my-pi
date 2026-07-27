@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"],
+    "typeRoots": [
+      "./extensions/pi-remote/node_modules/@types",
+      "./extensions/pi-interactive-subagents/node_modules/@types"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@mariozechner/pi-coding-agent": ["/Users/noah/n/lib/node_modules/@mariozechner/pi-coding-agent/dist/index.d.ts"],
+      "@mariozechner/pi-ai": ["/Users/noah/n/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-ai/dist/index.d.ts"],
+      "@mariozechner/pi-tui": ["/Users/noah/n/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-tui/dist/index.d.ts"],
+      "@mariozechner/pi-agent-core": ["/Users/noah/n/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-agent-core/dist/index.d.ts"],
+      "typebox": ["/Users/noah/n/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/typebox/build/index.d.mts"]
+    }
+  },
+  "include": [
+    "extensions/*.ts",
+    "extensions/code-ast/**/*.ts",
+    "extensions/notifications/**/*.ts",
+    "extensions/subagent/**/*.ts",
+    "extensions/web-tools/**/*.ts",
+    "extension-shims.d.mts"
+  ],
+  "exclude": [
+    "extensions/pi-context/**",
+    "extensions/pi-interactive-subagents/**",
+    "extensions/pi-remote/**",
+    "**/node_modules/**"
+  ]
+}

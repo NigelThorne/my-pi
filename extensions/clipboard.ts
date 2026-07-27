@@ -15,7 +15,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { execSync } from "node:child_process";
 import { platform } from "node:os";
 
@@ -84,20 +84,17 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const result = await pi.exec(readCmd, readArgs);
 				const raw = result.stdout;
-				const truncated = truncateHead(raw, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
-				const wasTruncated = truncated.length < raw.length;
-				const text = wasTruncated
-					? `[Clipboard content truncated — showing first portion of ${formatSize(raw.length)}]\n\n${truncated}`
+				const truncation = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+				const text = truncation.truncated
+					? `[Clipboard content truncated — showing first portion of ${formatSize(Buffer.byteLength(truncation.content, "utf-8"))} of ${formatSize(Buffer.byteLength(raw, "utf-8"))}]\n\n${truncation.content}`
 					: raw;
 
 				return {
 					content: [{ type: "text", text: text || "(clipboard is empty)" }],
+					details: undefined,
 				};
 			} catch (err: any) {
-				return {
-					content: [{ type: "text", text: `Failed to read clipboard: ${err.message}` }],
-					isError: true,
-				};
+				throw new Error(`Failed to read clipboard: ${err.message}`);
 			}
 		},
 
@@ -105,8 +102,8 @@ export default function (pi: ExtensionAPI) {
 			return new Text(theme.fg("toolTitle", theme.bold("clipboard_read")), 0, 0);
 		},
 
-		renderResult(result, _opts, theme) {
-			if (result.isError) {
+		renderResult(result, _opts, theme, context) {
+			if (context.isError) {
 				const text = result.content[0];
 				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
 			}
@@ -137,12 +134,10 @@ export default function (pi: ExtensionAPI) {
 				const size = Buffer.byteLength(params.text, "utf-8");
 				return {
 					content: [{ type: "text", text: `Wrote ${formatSize(size)} to clipboard.` }],
+					details: undefined,
 				};
 			} catch (err: any) {
-				return {
-					content: [{ type: "text", text: `Failed to write clipboard: ${err.message}` }],
-					isError: true,
-				};
+				throw new Error(`Failed to write clipboard: ${err.message}`);
 			}
 		},
 
@@ -155,8 +150,8 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 
-		renderResult(result, _opts, theme) {
-			if (result.isError) {
+		renderResult(result, _opts, theme, context) {
+			if (context.isError) {
 				const text = result.content[0];
 				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
 			}
