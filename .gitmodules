@@ -7,4 +7,4 @@
 	url = https://github.com/ttttmr/pi-context.git
 [submodule "extensions/pi-interactive-subagents"]
 	path = extensions/pi-interactive-subagents
-	url = git@github.com:noahsaso/pi-interactive-subagents.git
+	url = git@github.com:NigelThorne/pi-interactive-subagents.git
