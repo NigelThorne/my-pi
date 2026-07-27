@@ -2,7 +2,7 @@
  * Notifications Extension — System notifications with custom chime sound
  *
  * Supports:
- *   macOS  — osascript notifications + afplay for sound
+ *   macOS  — notify-me notifications + afplay for sound
  *   Linux  — notify-send + aplay/paplay/ffplay for sound
  *
  * Tools:
@@ -18,18 +18,24 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { Text } from "@mariozechner/pi-tui";
-import { spawn, execSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
 
-function which(cmd: string): boolean {
+function findCommand(cmd: string): string | null {
   try {
-    execSync(`which ${cmd}`, { stdio: "ignore" });
-    return true;
+    return execFileSync("which", [cmd], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function which(cmd: string): boolean {
+  return findCommand(cmd) !== null;
 }
 
 const IS_MACOS = platform() === "darwin";
@@ -47,15 +53,11 @@ function detectSoundPlayer(): string[] | null {
   return null;
 }
 
-// Detect notification command
-function detectNotifier(): boolean {
-  if (IS_MACOS) return true; // osascript always available
-  if (IS_LINUX) return which("notify-send");
-  return false;
-}
+const NOTIFY_ME_PATH = IS_MACOS ? findCommand("notify-me") : null;
+const NOTIFY_SEND_PATH = IS_LINUX ? findCommand("notify-send") : null;
 
 const SOUND_PLAYER = detectSoundPlayer();
-const HAS_NOTIFIER = detectNotifier();
+const HAS_NOTIFIER = NOTIFY_ME_PATH !== null || NOTIFY_SEND_PATH !== null;
 
 const SOUND_PATH = (() => {
   try {
@@ -82,14 +84,14 @@ function playChime() {
 function showNotification(message: string, title: string = "pi") {
   if (!HAS_NOTIFIER) return;
   try {
-    if (IS_MACOS) {
-      const safeMsg = message.replace(/"/g, '\\"').replace(/'/g, "'");
-      const safeTitle = title.replace(/"/g, '\\"').replace(/'/g, "'");
-      execSync(
-        `osascript -e 'display notification "${safeMsg}" with title "${safeTitle}"'`
-      );
-    } else if (IS_LINUX) {
-      execSync(`notify-send ${JSON.stringify(title)} ${JSON.stringify(message)}`);
+    if (NOTIFY_ME_PATH) {
+      execFileSync(NOTIFY_ME_PATH, [
+        "--title", title,
+        "--message", message,
+        "--sound", "off",
+      ]);
+    } else if (NOTIFY_SEND_PATH) {
+      execFileSync(NOTIFY_SEND_PATH, [title, message]);
     }
   } catch {}
 }

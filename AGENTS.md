@@ -163,6 +163,36 @@ Remote terminal access for pi via WebSocket with Tailscale integration. Connect 
 - **Tailscale integration** — Automatically serves over HTTPS on your tailnet with a unique session subpath
 - **Discovery service** — Lists all active remote sessions at `/pi/`
 
+## Edit Tool Usage
+
+When using the `edit` tool:
+
+- `oldText` must match the file **exactly**, including whitespace, indentation, and line breaks.
+- Each `oldText` must match **one unique location** in the original file by default.
+- If you intentionally want to replace multiple identical occurrences, set `expectedOccurrences` to the exact positive integer count; do not guess and do not use an "all"/wildcard concept.
+- If a snippet may appear multiple times unintentionally, include **more surrounding exact context** in `oldText` to make it unique.
+- When adding extra context to make a match unique, preserve that unchanged context in `newText` too so it is not lost.
+- Prefer slightly larger exact replacements over tiny ambiguous ones.
+- If needed, re-read the relevant file section immediately before calling `edit` so the copied text matches exactly.
+- If multiple edits are sent in one `edit` call, each `oldText` is matched against the **original file**, not after earlier replacements in that same call.
+
+### Common `edit` failure modes
+
+- “Found multiple occurrences” → make `oldText` more unique by including more surrounding exact context, or set `expectedOccurrences` to the exact count if you really intend to replace every occurrence.
+- “Must match exactly including whitespace” → re-read the file and copy the exact indentation, spacing, and newlines.
+
+## Git Workflow
+
+### `git mm` (merge-master)
+
+Use `git mm` to rebase the current feature branch onto the latest `main`. This is a smart rebase alias that:
+
+1. Fetches the latest `origin/main`
+2. Finds the squash-merge commit on `main` whose tree matches already-merged commits
+3. Rebases only **new** commits onto that point, skipping commits that were already squash-merged
+
+Use it after a PR is merged and you want to continue working on the same branch with new commits on top of the updated `main`.
+
 ## Workflow Preferences
 
 - Use **superpowers skills** when available (brainstorming, writing-plans, subagent-driven-development, branch-driven-development, test-driven-development, etc.)

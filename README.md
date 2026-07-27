@@ -129,7 +129,7 @@ Large clipboard contents are automatically truncated.
 
 ### notifications/
 
-System notifications with a custom chime sound. Plays a ping when the agent needs your attention. Cross-platform: macOS (`osascript` + `afplay`), Linux (`notify-send` + `paplay`/`aplay`/`ffplay`). Skips registration silently on unsupported platforms.
+System notifications with a custom chime sound. Plays a ping when the agent needs your attention. Cross-platform: macOS (`notify-me` + `afplay`), Linux (`notify-send` + `paplay`/`aplay`/`ffplay`). Skips registration silently when the required notification command is unavailable.
 
 **Tools:** `notify`, `ask_user`
 **Command:** `/ping`

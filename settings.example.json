@@ -1,4 +1,6 @@
 {
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "medium",
   "doubleEscapeAction": "tree",
   "theme": "dark",
@@ -12,6 +14,7 @@
   ],
   "packages": [
     "~/.my-pi/extensions/pi-remote/packages/remote",
-    "~/.my-pi/extensions/pi-interactive-subagents"
+    "~/.my-pi/extensions/pi-interactive-subagents",
+    "git:github.com/pasky/chrome-cdp-skill@v1.0.1"
   ]
 }

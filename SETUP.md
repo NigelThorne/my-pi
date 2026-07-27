@@ -4,19 +4,22 @@ Follow these steps to set up this pi instance.
 
 ## 1. Settings
 
-Copy settings and global prompt:
+Copy settings, keybindings, and global prompt:
 
 ```bash
 mkdir -p ~/.pi/agent
 cp ~/.my-pi/settings.example.json ~/.pi/agent/settings.json
+cp ~/.my-pi/keybindings.json ~/.pi/agent/keybindings.json
 cp ~/.my-pi/AGENTS.md ~/.pi/agent/AGENTS.md
 ```
 
-If `~/.pi/agent/settings.json` already exists, merge in the `extensions` and `skills` arrays rather than overwriting.
+If `~/.pi/agent/settings.json` already exists, merge in the `extensions`, `skills`, and `packages` arrays rather than overwriting. Keep runtime-only fields such as `lastChangelogVersion` local to `~/.pi/agent/settings.json`; do not commit them.
 
 ## 2. Agents
 
-Copy subagent definitions:
+Subagent definitions are version-controlled in `~/.my-pi/agents/`. The interactive subagents extension reads them from there, so `~/.pi/agent/agents` should not be used as the source of truth.
+
+For compatibility with older extension versions, you can still sync copies:
 
 ```bash
 mkdir -p ~/.pi/agent/agents
@@ -123,7 +126,7 @@ The pi-remote package is included as a git submodule with Tailscale integration.
 ```bash
 cd ~/.my-pi
 git submodule update --init --recursive
-cd extensions/pi-remote/packages/remote && npm install && npm run build
+cd extensions/pi-remote && npm install --ignore-scripts && npm run build --workspace @noahsaso/pi-remote
 ```
 
 This fork automatically runs `tailscale serve` when starting a remote session, exposing it over HTTPS on a unique subpath (`/pi/{session-id}/?token=...`) with Tailscale's auto-provisioned TLS certificate. The serve route is cleaned up when the session exits.

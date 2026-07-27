@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: Use when the user explicitly asks to brainstorm, or when requirements are still fuzzy enough that design exploration is needed before implementation.
 ---
 
 # Brainstorming Ideas Into Designs
@@ -9,7 +9,21 @@ description: "You MUST use this before any creative work - creating features, bu
 
 Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
 
+This skill is optional by default. Use it when the user asks to brainstorm, explore options, or shape a design before implementation. Do not force it for every feature request.
+
 Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design in small sections (200-300 words), checking after each section whether it looks right so far.
+
+## When to Use
+
+Use this skill when:
+- the user says things like "let's brainstorm this", "help me think this through", or "what are our options?"
+- the requirements are genuinely unclear and multiple plausible designs need comparison
+- the user wants to explore trade-offs before writing code
+
+Do not use this skill when:
+- the user gives a direct implementation request and wants you to just do it
+- the task is a straightforward bugfix or targeted edit
+- design exploration would slow down obvious execution
 
 ## The Process
 

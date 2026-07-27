@@ -1,0 +1,4 @@
+{
+  "tui.input.newLine": ["ctrl+j", "shift+enter"],
+  "tui.input.submit": ["enter"]
+}

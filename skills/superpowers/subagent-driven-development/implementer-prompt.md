@@ -75,4 +75,6 @@ Task tool (general-purpose):
     - Files changed
     - Self-review findings (if any)
     - Any issues or concerns
+    
+    Finally you must execute subagent_done to allow the calling agent to know you have finished.
 ```
