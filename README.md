@@ -104,6 +104,7 @@ Async subagent orchestration in multiplexer panes. From [HazAT/pi-interactive-su
 | `scout` | Fast codebase recon | Haiku 4.5 |
 | `planner` | Brainstorming & planning | Opus (medium thinking) |
 | `worker` | Implementation | Sonnet |
+| `orchestrator` | Mycelium workstream coordination | Opus |
 | `reviewer` | Code review | Opus (medium thinking) |
 | `visual-tester` | Visual QA via Chrome CDP | Sonnet |
 
@@ -118,6 +119,18 @@ Features:
 - Agent access control via `spawning: false` and `deny-tools` frontmatter
 - Role folders with per-agent `cwd` and config
 - Requires a terminal multiplexer (cmux, tmux, or zellij)
+
+### mycelium-watchdog/
+
+Personal behavior layer for sessions using `mycelium-pi`. It does not start Mycelium or register Mycelium tools; it reads the existing Mycelium inbox/session files and nudges agents that own active work but are not progressing.
+
+Features:
+- 1-minute heartbeat.
+- Pokes after 2 minutes with active work and no progress.
+- Keeps a pending progress expectation open after a poke; it does not restart the timer just because it poked.
+- Immediately re-prompts when an agent responds with ACK/intent only and no meaningful tool action.
+- Escalates after repeated/no-progress watchdog prompts.
+- Writes `.mycelium/nigel-watchdog-<session-id>.json` so idle sessions can be diagnosed.
 
 ### clipboard.ts
 

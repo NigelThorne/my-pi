@@ -24,6 +24,7 @@ Spawn async subagents in dedicated multiplexer panes. Fully non-blocking — the
 - `scout` (Haiku 4.5) — Fast codebase recon, returns structured findings for handoff
 - `planner` (Opus, medium thinking) — Brainstorming, clarifies requirements, writes plans, creates todos
 - `worker` (Sonnet) — Implements tasks from todos, writes code, runs tests
+- `orchestrator` (Opus) — Drives Mycelium workstreams to completion by planning, allocating, monitoring, and escalating
 - `reviewer` (Opus, medium thinking) — Code review for bugs, security, correctness
 - `visual-tester` (Sonnet) — Visual QA via Chrome CDP, screenshots, responsive testing
 
@@ -45,6 +46,16 @@ Use subagents for:
 - Code review after completing work
 - Parallel investigation (call `subagent` multiple times — they run concurrently)
 - Full planning pipelines via `/plan`
+
+### Nigel Mycelium Watchdog (`nigel-mycelium-watchdog`)
+
+Personal Mycelium behavior layer on top of `mycelium-pi`. It does not register Mycelium tools or start the MCP server. It reads the active Mycelium inbox/session files, watches active claimed work, and prompts agents that are idle or that acknowledge work without making progress.
+
+- Heartbeat: every minute.
+- First poke: after 2 minutes without progress on active work.
+- Pending progress: watchdog keeps the expectation open and does not restart the timer after each poke.
+- Escalation: if there is still no progress by the escalation deadline, prompts the agent to escalate to the orchestrator or `@Nigel Thorne`.
+- Audit file: `.mycelium/nigel-watchdog-<session-id>.json` records active activity, phase, last prompt, last assistant preview, last tool calls, and failed attempt count.
 
 ### Web Tools (`webfetch`, `websearch`)
 
