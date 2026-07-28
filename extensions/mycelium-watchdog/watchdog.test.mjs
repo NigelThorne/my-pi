@@ -121,6 +121,21 @@ test('progress after a watchdog poke clears pending expectation and restarts idl
   assert.deepEqual(watchdog.status(3 * MINUTE), { phase: 'thread-help', nextActionAt: 5 * MINUTE, failedAttemptCount: 0 });
 });
 
+test('explicit progress during tool work resets idle timer before a false idle poke', () => {
+  const watchdog = new WorkWatchdog();
+  watchdog.observe({ now: 0, activityId: 'activity:auth', agentBusy: false, connected: true });
+  watchdog.observeProgress('activity:auth', 90_000);
+
+  assert.deepEqual(
+    watchdog.poll({ now: 2 * MINUTE, activityId: 'activity:auth', agentBusy: false, connected: true }),
+    [],
+  );
+  assert.deepEqual(
+    watchdog.poll({ now: 210_000, activityId: 'activity:auth', agentBusy: false, connected: true }),
+    [{ type: 'thread-help', activityId: 'activity:auth' }],
+  );
+});
+
 test('routes watchdog actions to the right mechanism', () => {
   assert.equal(watchdogDestination('thread-help'), 'activity-log');
   assert.equal(watchdogDestination('immediate-retry'), 'steer');

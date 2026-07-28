@@ -203,6 +203,14 @@ export class WorkWatchdog {
     this.idleSince = undefined;
   }
 
+  observeProgress(activityId: string, now: number): void {
+    if (this.activityId !== activityId) {
+      this.reset();
+      this.activityId = activityId;
+    }
+    this.markProgress(now, false);
+  }
+
   observeAgentBusy(): void {
     // Busy is not progress. Do not reset deadlines here; observe() sees agentBusy
     // and suppresses time-based actions while the turn is running.

@@ -18,7 +18,10 @@ interface InboxState {
 }
 
 const STATUS_REFRESH_MS = 60_000;
-const TOOL_ACTIONS = new Set(['read', 'bash', 'grep', 'find', 'ls', 'edit', 'write']);
+
+function isMeaningfulProgressTool(toolName: string): boolean {
+  return /^(read|bash|grep|find|ls|edit|write|ast_|run_tests|webfetch|websearch|pickup_work|pickup_handover|read_work|get_messages|find_messages|get_activities|get_awareness|list_work|view_file|get_page|list_pages|todo_|log|set_my_status|resolve_work|complete_activity|raise|decide|request_access)$/.test(toolName);
+}
 
 function myceliumDir(cwd: string): string {
   return process.env['MYCELIUM_SCRATCH_DIR'] || join(cwd, '.mycelium');
@@ -70,6 +73,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   let currentToolCalls: TurnToolCall[] = [];
   let lastAssistantPreview = '';
   let lastTurnAt = 0;
+  let lastToolAt = 0;
   let lastSteerAt = 0;
   let lastSteerReason = '';
   let fallbackOutcome = '';
@@ -152,7 +156,11 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     const inbox = await readInbox();
     const activityId = inbox?.self?.activityId;
     const connected = Boolean(inbox || existsSync(join(mycDir, 'connection.json')));
-    const actions = watchdog.poll({ now: Date.now(), activityId, agentBusy, connected });
+    const now = Date.now();
+    const piBusy = ctxRef ? !ctxRef.isIdle() : false;
+    const recentlyUsedTool = lastToolAt > 0 && now - lastToolAt < 90_000;
+    const effectiveAgentBusy = agentBusy || piBusy || recentlyUsedTool;
+    const actions = watchdog.poll({ now, activityId, agentBusy: effectiveAgentBusy, connected });
     for (const action of actions) handleAction(action);
     const status = watchdog.status(Date.now());
     if (!activityId) ui?.setStatus('nigel-mycelium-watchdog', undefined);
@@ -195,7 +203,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       activityId: currentInbox?.self?.activityId,
       activityLabel: currentInbox?.self?.activityLabel,
       lastPollAt: new Date().toISOString(),
-      agentBusy,
+      agentBusy: agentBusy || Boolean(ctxRef && !ctxRef.isIdle()),
       connected: Boolean(currentInbox || existsSync(join(mycDir, 'connection.json'))),
       phase: phase ?? watchdog.status(Date.now()).phase,
       nextActionAt: nextActionAt ? new Date(nextActionAt).toISOString() : undefined,
@@ -203,6 +211,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       lastSteerAt: lastSteerAt ? new Date(lastSteerAt).toISOString() : undefined,
       lastSteerReason,
       lastTurnAt: lastTurnAt ? new Date(lastTurnAt).toISOString() : undefined,
+      lastToolAt: lastToolAt ? new Date(lastToolAt).toISOString() : undefined,
       lastTurnToolCalls: currentToolCalls.map((call) => call.name),
       lastAssistantPreview,
       failedAttemptCount: watchdog.status(Date.now()).failedAttemptCount ?? 0,
@@ -258,7 +267,13 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   pi.on('tool_call', async (event) => {
     const input = (event.input ?? {}) as Record<string, unknown>;
     currentToolCalls.push({ name: event.toolName, input });
-    if (TOOL_ACTIONS.has(event.toolName)) void writeAudit();
+    lastToolAt = Date.now();
+    if (isMeaningfulProgressTool(event.toolName)) {
+      const inbox = await readInbox();
+      const activityId = inbox?.self?.activityId;
+      if (activityId) watchdog.observeProgress(activityId, lastToolAt);
+      void writeAudit(inbox);
+    }
     return undefined;
   });
 
