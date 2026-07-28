@@ -6,6 +6,7 @@ import {
   classifyTurn,
   recoveryPrompt,
   retryPrompt,
+  blockingQuestionInstruction,
   isInboundEvent,
   watchdogDestination,
 } from './watchdog.ts';
@@ -26,6 +27,16 @@ test('watchdog prompts ask whether work is done, blocked, or actually progressin
   assert.match(recoveryPrompt('activity:auth'), /Are you done, blocked, or actually working/i);
   assert.match(recoveryPrompt('activity:auth'), /Do not merely acknowledge/i);
   assert.match(retryPrompt('activity:auth', 'ack only'), /Do not acknowledge/i);
+});
+
+test('blocked instructions say where to post, who to mention, and which tools to use', () => {
+  const instruction = blockingQuestionInstruction('activity:auth');
+  assert.match(instruction, /send_message/);
+  assert.match(instruction, /activityId "activity:auth"/);
+  assert.match(instruction, /log/);
+  assert.match(instruction, /orchestrator/);
+  assert.match(instruction, /@Nigel Thorne/);
+  assert.match(instruction, /set_my_status/);
 });
 
 test('classifies ACK-only and assent-only turns as not progress', () => {

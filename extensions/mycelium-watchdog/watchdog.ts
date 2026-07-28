@@ -51,18 +51,25 @@ const ASSENT_ONLY_RE = /^(?:\s*(?:ack(?:\s+#[\w-]+)?\.?|sure(?: thing)?[,.!\s]*(
 const COMPLETION_RE = /\b(done|completed|resolved|fixed|implemented|verified|tests? pass|handed off|handoff|marked (?:done|blocked)|blocked because|blocked on|cannot proceed because)\b/i;
 const BLOCKING_QUESTION_RE = /\?\s*$|\b(blocked|need (?:a )?(?:decision|permission|access|clarification)|please confirm|can you grant|should i)\b/i;
 
+export function blockingQuestionInstruction(activityId: string): string {
+  return `If blocked, post the question where collaborators will see it: use send_message with activityId \"${activityId}\" (or log if you are already in that activity). ` +
+    'Address the orchestrator by @mention if you know who is coordinating this work; otherwise @Nigel Thorne. ' +
+    'State the specific decision/access/info needed, what you already tried, and what you will do after the answer. ' +
+    'Also call set_my_status with status "blocked" and a short statusText.';
+}
+
 export function recoveryPrompt(activityId: string): string {
   return `Mycelium watchdog: you still own active work (${activityId}) and have been idle. ` +
     'Are you done, blocked, or actually working? Continue now with the next concrete tool action. ' +
     'Inspect git status, pending Mycelium replies, work item/thread state, PR/CI, or failed logs as appropriate. ' +
-    'If blocked, ask a focused question in Mycelium or mark yourself blocked with the concrete reason. ' +
+    `${blockingQuestionInstruction(activityId)} ` +
     'Do not merely acknowledge this prompt or say you will do it.';
 }
 
 export function retryPrompt(activityId: string, reason: string): string {
   return `Mycelium watchdog: your previous response did not make progress on active work (${activityId}) — ${reason}. ` +
     'Do not acknowledge this prompt. Take the next concrete tool action now. ' +
-    'If you cannot proceed, ask a specific blocking question in Mycelium or mark yourself blocked with the concrete reason.';
+    `${blockingQuestionInstruction(activityId)}`;
 }
 
 export function isInboundEvent(event: { type: string }): boolean {
