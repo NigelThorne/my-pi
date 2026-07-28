@@ -2,6 +2,19 @@
 
 Custom [pi](https://github.com/badlogic/pi-mono) extensions, skills, and agents.
 
+## Provenance
+
+This repo is Nigel Thorne's personal fork of `my-pi`.
+
+- Current home: <https://github.com/NigelThorne/my-pi>
+- Originally forked from: <https://github.com/noahsaso/my-pi>
+- Local policy: day-to-day work should push to Nigel's fork/remotes, not to the original upstream.
+
+Some submodules also began on upstream repos and are now pointed at Nigel-owned forks when local customizations are needed:
+
+- `extensions/pi-interactive-subagents`: originally `noahsaso/pi-interactive-subagents`, now `NigelThorne/pi-interactive-subagents`
+- `extensions/pi-remote`: originally `noahsaso/pi-remote`, now `NigelThorne/pi-remote`
+
 ## Structure
 
 ```
@@ -17,7 +30,7 @@ agents/        # Subagent definitions (copy to ~/.pi/agent/agents/)
 ### Quick Bootstrap
 
 ```bash
-git clone https://github.com/noahsaso/my-pi ~/.my-pi
+git clone https://github.com/NigelThorne/my-pi ~/.my-pi
 cd ~/.my-pi && pi "Read SETUP.md and walk me through setting up pi with my custom extensions, skills, and agents. Do each step, ask me for input when needed (API keys, versions), and verify everything works at the end."
 ```
 
