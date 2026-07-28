@@ -160,6 +160,12 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     child.unref?.();
   }
 
+  async function handleInboxFileChanged(): Promise<void> {
+    const inbox = await readInbox();
+    maybeRunMyceliumJoinCommand(inbox);
+    await dispatchInboxEvents();
+  }
+
   async function dispatchInboxEvents(): Promise<void> {
     if (!ownsInbox) return;
     await inboxDispatcher.dispatch(readInbox, async (fresh) => {
@@ -257,7 +263,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   function watchInboxFile(): void {
     try {
       inboxWatcher = watch(mycDir, { persistent: false }, (_event, filename) => {
-        if (filename === `inbox-${sessionId}.json`) void dispatchInboxEvents();
+        if (filename === `inbox-${sessionId}.json`) void handleInboxFileChanged();
       });
     } catch {
       // Timer also polls the inbox.
@@ -285,7 +291,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     inboxDispatcher.reset(inbox);
     watchInboxFile();
     timer = setInterval(() => {
-      void dispatchInboxEvents();
+      void handleInboxFileChanged();
       void runWatchdog();
     }, STATUS_REFRESH_MS);
     timer.unref?.();
@@ -326,7 +332,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       now: Date.now(),
     });
     for (const action of actions) handleAction(action);
-    await dispatchInboxEvents().catch(() => {});
+    await handleInboxFileChanged().catch(() => {});
     await writeAudit(inbox);
   });
 
