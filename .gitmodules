@@ -1,6 +1,6 @@
 [submodule "extensions/pi-remote"]
 	path = extensions/pi-remote
-	url = git@github.com:noahsaso/pi-remote.git
+	url = git@github.com:NigelThorne/pi-remote.git
 	branch = feat/tailscale
 [submodule "extensions/pi-context"]
 	path = extensions/pi-context
