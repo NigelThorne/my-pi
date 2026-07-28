@@ -78,6 +78,8 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   let lastSteerReason = '';
   let fallbackOutcome = '';
   let agentBusy = false;
+  let lastPaneRenameName = '';
+  let paneRenameOutcome = '';
 
   const watchdog = new WorkWatchdog();
   const inboxDispatcher = new InboxEventDispatcher<InboxSteerEvent>();
@@ -129,6 +131,35 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     steer(recoveryPrompt(action.activityId), action.type);
   }
 
+  function maybeRunMyceliumJoinCommand(inbox?: InboxState | null): void {
+    const displayName = inbox?.self?.displayName?.trim();
+    if (!displayName || displayName === lastPaneRenameName) return;
+
+    lastPaneRenameName = displayName;
+    const paneId = process.env['ZELLIJ_PANE_ID']?.trim();
+    if (!paneId) {
+      paneRenameOutcome = 'skipped: not in zellij';
+      void writeAudit(inbox);
+      return;
+    }
+
+    paneRenameOutcome = `renaming pane to ${displayName}`;
+    const child = spawn('zellij', ['action', 'rename-pane', '--pane-id', paneId, displayName], {
+      stdio: 'ignore',
+      detached: true,
+      env: process.env,
+    });
+    child.on('error', (error) => {
+      paneRenameOutcome = `rename failed: ${error.message}`;
+      void writeAudit(inbox);
+    });
+    child.on('exit', (code) => {
+      paneRenameOutcome = code === 0 ? `renamed pane to ${displayName}` : `rename exited ${code}`;
+      void writeAudit(inbox);
+    });
+    child.unref?.();
+  }
+
   async function dispatchInboxEvents(): Promise<void> {
     if (!ownsInbox) return;
     await inboxDispatcher.dispatch(readInbox, async (fresh) => {
@@ -146,6 +177,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       await writeJsonAtomic(deliveredInboxPath(), keys).catch(() => {});
 
       const inbox = await readInbox();
+      maybeRunMyceliumJoinCommand(inbox);
       const activityId = inbox?.self?.activityId;
       if (activityId) watchdog.expectProgress(activityId, Date.now());
       steer(formatInboxSteer(incoming), 'inbox-actionable-message');
@@ -154,6 +186,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
 
   async function runWatchdog(): Promise<void> {
     const inbox = await readInbox();
+    maybeRunMyceliumJoinCommand(inbox);
     const activityId = inbox?.self?.activityId;
     const connected = Boolean(inbox || existsSync(join(mycDir, 'connection.json')));
     const now = Date.now();
@@ -216,6 +249,8 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       lastAssistantPreview,
       failedAttemptCount: watchdog.status(Date.now()).failedAttemptCount ?? 0,
       fallbackOutcome,
+      paneRenameName: lastPaneRenameName || undefined,
+      paneRenameOutcome: paneRenameOutcome || undefined,
     }).catch(() => {});
   }
 
@@ -246,6 +281,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       ui?.notify('Nigel Mycelium watchdog: another extension instance owns actionable inbox steering', 'warning');
     }
     const inbox = await readInbox();
+    maybeRunMyceliumJoinCommand(inbox);
     inboxDispatcher.reset(inbox);
     watchInboxFile();
     timer = setInterval(() => {
@@ -270,6 +306,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     lastToolAt = Date.now();
     if (isMeaningfulProgressTool(event.toolName)) {
       const inbox = await readInbox();
+      maybeRunMyceliumJoinCommand(inbox);
       const activityId = inbox?.self?.activityId;
       if (activityId) watchdog.observeProgress(activityId, lastToolAt);
       void writeAudit(inbox);
@@ -281,6 +318,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     lastTurnAt = Date.now();
     lastAssistantPreview = preview(assistantText((event as { message?: unknown }).message));
     const inbox = await readInbox();
+    maybeRunMyceliumJoinCommand(inbox);
     const actions = watchdog.observeTurnResult({
       activityId: inbox?.self?.activityId,
       assistantText: lastAssistantPreview,
