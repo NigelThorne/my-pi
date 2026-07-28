@@ -16,5 +16,8 @@
     "~/.my-pi/extensions/pi-remote/packages/remote",
     "~/.my-pi/extensions/pi-interactive-subagents",
     "git:github.com/pasky/chrome-cdp-skill@v1.0.1"
+  ],
+  "prompts": [
+    "~/.my-pi/prompts"
   ]
 }
