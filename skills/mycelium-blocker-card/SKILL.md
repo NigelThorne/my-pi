@@ -84,7 +84,17 @@ Use `publish_gadget` for a visible card with:
 - Thread/activity id
 - “What happens after approval”
 
-Include a **canonical link preview** inside the gadget for the object that resolves the blocker. The outer Mycelium gadget shell may only show a generic interactive preview, so the gadget itself should make the linked object legible at a glance:
+Include a **canonical object preview inside the opened gadget** for the object that resolves the blocker. Important limitation: the outer Mycelium gadget tile in chat currently shows the platform's generic gadget preview (icon, title, "Interactive gadget", Open button). `publish_gadget` does not currently let the publisher customize that collapsed tile preview.
+
+To make the blocker legible before opening, put the essential preview in the message caption or activity-thread notification:
+
+- `BLOCKED: <worker/work>`
+- `Decision/access needed: <specific ask>`
+- `Owner: @orchestrator or @Nigel Thorne`
+- `Canonical id: decision:... / grant id / task:...`
+- `Needed response: approve/deny/choose option`
+
+Inside the opened gadget, show a richer canonical object preview with:
 
 - Object kind: Decision / Access request / Task / Issue
 - Object status: Open / Pending / Active / Done
@@ -95,7 +105,7 @@ Include a **canonical link preview** inside the gadget for the object that resol
 - Needed response
 - Activity/thread id
 
-Keep HTML self-contained. No external network calls.
+Optional workaround: attach a static screenshot/image preview alongside the gadget message if the collapsed chat feed needs a visual preview. Keep gadget HTML self-contained. No external network calls.
 
 ## Common Mistakes
 
