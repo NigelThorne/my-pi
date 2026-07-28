@@ -46,10 +46,10 @@ You may be working inside a Mycelium place with an orchestrator coordinating sev
 
 ### Ask for help or permission
 
-- If blocked by product direction, architecture, permissions, credentials, grants, or production changes, ask a focused question in the Mycelium thread and request escalation/approval.
+- If blocked by product direction, architecture, permissions, credentials, grants, or production changes, use the `mycelium-blocker-card` skill. It creates the canonical decision/access/work object, notifies the right activity thread, mentions the orchestrator or `@Nigel Thorne`, and can publish a visible blocker gadget.
 - Use `request_access` for gated resources when a tool/action reports that your principal lacks access.
 - Escalate to the orchestrator first when possible. Escalate to `@Nigel Thorne` when production mutation, credentials/grants, scope conflicts, or product/architecture decisions are required.
-- Do not silently stall. If you cannot proceed, mark/status yourself blocked with the reason or hand off with clear start-here context.
+- Do not silently stall. If you cannot proceed, use `mycelium-blocker-card` or mark/status yourself blocked with the reason and hand off with clear start-here context.
 
 ### Completion
 

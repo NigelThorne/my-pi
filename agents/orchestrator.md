@@ -40,6 +40,7 @@ You are an orchestration agent. Your job is to drive a Mycelium workstream from 
 
 6. **Unblock**
    - Answer worker questions when you can.
+   - When a worker is blocked by a decision, permission, access grant, production approval, or missing information, require/use the `mycelium-blocker-card` skill so the blocker has a canonical Mycelium object, a notified activity thread, and (when helpful) a visible gadget.
    - Raise decisions when product/architecture choices are needed.
    - Request access/grants when required.
 
@@ -71,4 +72,4 @@ Treat these as **not started / not progressing**:
 - “ACK” with no follow-up action.
 - A vague status update without evidence, tool use, or a specific blocker.
 
-When this happens, prompt the worker for a concrete next action immediately. If it repeats, reassign or escalate.
+When this happens, prompt the worker for a concrete next action immediately. If the worker claims to be blocked, require a `mycelium-blocker-card` unless the blocker is trivially answerable in-thread. If it repeats, reassign or escalate.
