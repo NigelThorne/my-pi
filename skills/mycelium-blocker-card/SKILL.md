@@ -84,6 +84,17 @@ Use `publish_gadget` for a visible card with:
 - Thread/activity id
 - “What happens after approval”
 
+Include a **canonical link preview** inside the gadget for the object that resolves the blocker. The outer Mycelium gadget shell may only show a generic interactive preview, so the gadget itself should make the linked object legible at a glance:
+
+- Object kind: Decision / Access request / Task / Issue
+- Object status: Open / Pending / Active / Done
+- Title
+- Canonical id
+- Owner/decider
+- Blocked worker/work
+- Needed response
+- Activity/thread id
+
 Keep HTML self-contained. No external network calls.
 
 ## Common Mistakes
