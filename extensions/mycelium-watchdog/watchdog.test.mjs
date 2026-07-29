@@ -24,10 +24,11 @@ function triggerIdleWatchdog() {
   return watchdog;
 }
 
-test('watchdog prompts an idle agent to resume work or register a waiting condition', () => {
-  assert.match(recoveryPrompt('activity:auth'), /If you are not waiting, continue now/i);
+test('watchdog prompts ask whether work is done, blocked, or actually progressing', () => {
+  assert.match(recoveryPrompt('activity:auth'), /Are you done, blocked, or actually working/i);
+  assert.match(recoveryPrompt('activity:auth'), /Do not merely acknowledge/i);
   assert.match(recoveryPrompt('activity:auth'), /set_waiting_for/);
-  assert.match(retryPrompt('activity:auth', 'ack only'), /previous response did not make progress/i);
+  assert.match(retryPrompt('activity:auth', 'ack only'), /Do not acknowledge/i);
 });
 
 test('blocked instructions say where to post, who to mention, and which tools to use', () => {
@@ -38,7 +39,6 @@ test('blocked instructions say where to post, who to mention, and which tools to
   assert.match(instruction, /orchestrator/);
   assert.match(instruction, /@Nigel Thorne/);
   assert.match(instruction, /set_my_status/);
-  assert.match(instruction, /set_waiting_for/);
 });
 
 test('classifies ACK-only and assent-only turns as not progress', () => {
