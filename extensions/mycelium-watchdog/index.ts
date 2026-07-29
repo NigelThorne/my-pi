@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { InboxEventDispatcher, formatInboxSteer, type InboxSteerEvent } from './inbox.ts';
+import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer, type InboxSteerEvent } from './inbox.ts';
 import { WorkWatchdog, recoveryPrompt, retryPrompt, isInboundEvent, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
 
 interface InboxState {
@@ -83,11 +83,11 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
 
   const watchdog = new WorkWatchdog();
   const inboxDispatcher = new InboxEventDispatcher<InboxSteerEvent>();
-  const deliveredInboxEvents = new Set<string>();
+  const idleInboxDelivery = new IdleInboxDelivery<InboxSteerEvent>();
 
   const inboxPath = () => join(mycDir, `inbox-${sessionId}.json`);
   const inboxLockPath = () => join(mycDir, `nigel-watchdog-inbox-owner-${sessionId}.lock`);
-  const deliveredInboxPath = () => join(mycDir, `nigel-watchdog-delivered-inbox-${sessionId}.json`);
+  const pendingInboxPath = () => join(mycDir, `nigel-watchdog-pending-inbox-${sessionId}.json`);
   const auditPath = () => join(mycDir, `nigel-watchdog-${sessionId}.json`);
 
   async function readInbox(): Promise<InboxState | null> {
@@ -166,28 +166,44 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     await dispatchInboxEvents();
   }
 
+  async function persistPendingInbox(): Promise<boolean> {
+    try {
+      await writeJsonAtomic(pendingInboxPath(), idleInboxDelivery.snapshot());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function dispatchInboxEvents(): Promise<void> {
     if (!ownsInbox) return;
     await inboxDispatcher.dispatch(readInbox, async (fresh) => {
-      const incoming = fresh.filter(isInboundEvent).filter((event) => {
-        const key = `${event.type}\u0000${event.threadId ?? ''}\u0000${event.peer ?? ''}\u0000${event.detail ?? ''}`;
-        if (deliveredInboxEvents.has(key)) return false;
-        deliveredInboxEvents.add(key);
-        return true;
-      });
+      const incoming = fresh.filter(isInboundEvent);
       if (incoming.length === 0) return;
-
-      const keys = [...deliveredInboxEvents].slice(-500);
-      deliveredInboxEvents.clear();
-      keys.forEach((key) => deliveredInboxEvents.add(key));
-      await writeJsonAtomic(deliveredInboxPath(), keys).catch(() => {});
-
-      const inbox = await readInbox();
-      maybeRunMyceliumJoinCommand(inbox);
-      const activityId = inbox?.self?.activityId;
-      if (activityId) watchdog.expectProgress(activityId, Date.now());
-      steer(formatInboxSteer(incoming), 'inbox-actionable-message');
+      idleInboxDelivery.enqueue(incoming);
+      await persistPendingInbox();
     });
+    await deliverInboxIfIdle();
+  }
+
+  async function deliverInboxIfIdle(isIdle = Boolean(ctxRef?.isIdle()) && !agentBusy): Promise<void> {
+    // A steer sent while Pi is already responding can be lost. Keep inbound
+    // events durable until the fresh turn has been requested after Pi settles.
+    const incoming = idleInboxDelivery.peekIfIdle(isIdle);
+    if (incoming.length === 0 || !await persistPendingInbox()) return;
+
+    const inbox = await readInbox();
+    maybeRunMyceliumJoinCommand(inbox);
+    const activityId = inbox?.self?.activityId;
+    if (activityId) watchdog.expectProgress(activityId, Date.now());
+    try {
+      steer(formatInboxSteer(incoming), 'inbox-actionable-message');
+    } catch {
+      return;
+    }
+    idleInboxDelivery.acknowledge(incoming.length);
+    // A failure here can replay after a restart, but cannot lose the message.
+    await persistPendingInbox();
   }
 
   async function runWatchdog(): Promise<void> {
@@ -254,6 +270,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       lastTurnToolCalls: currentToolCalls.map((call) => call.name),
       lastAssistantPreview,
       failedAttemptCount: watchdog.status(Date.now()).failedAttemptCount ?? 0,
+      pendingInboxEventCount: idleInboxDelivery.snapshot().length,
       fallbackOutcome,
       paneRenameName: lastPaneRenameName || undefined,
       paneRenameOutcome: paneRenameOutcome || undefined,
@@ -276,8 +293,8 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     sessionId = `pi_${ctx.sessionManager.getSessionId()}`;
     mycDir = myceliumDir(ctx.cwd);
     await mkdir(mycDir, { recursive: true }).catch(() => {});
-    const delivered = await readJson<string[]>(deliveredInboxPath());
-    for (const key of delivered ?? []) deliveredInboxEvents.add(key);
+    const pending = await readJson<InboxSteerEvent[]>(pendingInboxPath());
+    idleInboxDelivery.enqueue(pending ?? []);
     try {
       const lock = await open(inboxLockPath(), 'wx');
       await lock.writeFile(String(process.pid));
@@ -338,6 +355,10 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
 
   pi.on('agent_settled', async () => {
     agentBusy = false;
+    await dispatchInboxEvents();
+    // `agent_settled` is the lifecycle guarantee that a new steer may start a
+    // turn, even if the context's idle flag has not updated yet.
+    await deliverInboxIfIdle(true);
     await runWatchdog();
   });
 

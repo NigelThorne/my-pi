@@ -49,6 +49,30 @@ export function formatInboxSteer(events: InboxSteerEvent[]): string {
   ].join('\n\n') + extraInstruction;
 }
 
+/**
+ * Buffers actionable inbox events until Pi is idle, so an inbound message can
+ * immediately start a fresh turn without interrupting a turn already running.
+ */
+export class IdleInboxDelivery<T> {
+  private pending: T[] = [];
+
+  enqueue(events: T[]): void {
+    this.pending.push(...events);
+  }
+
+  peekIfIdle(isIdle: boolean): T[] {
+    return isIdle ? [...this.pending] : [];
+  }
+
+  acknowledge(count: number): void {
+    this.pending.splice(0, count);
+  }
+
+  snapshot(): T[] {
+    return [...this.pending];
+  }
+}
+
 export class InboxEventDispatcher<T> {
   private lastSeq: number;
   private lastEventCount: number;
