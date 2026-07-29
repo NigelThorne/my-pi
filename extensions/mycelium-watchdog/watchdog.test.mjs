@@ -10,7 +10,7 @@ import {
   isInboundEvent,
   watchdogDestination,
 } from './watchdog.ts';
-import { IdleInboxDelivery } from './inbox.ts';
+import { IdleInboxDelivery, formatInboxSteer } from './inbox.ts';
 
 const MINUTE = 60_000;
 
@@ -144,10 +144,18 @@ test('routes watchdog actions to the right mechanism', () => {
   assert.equal(watchdogDestination('fallback'), 'fallback');
 });
 
-test('classifies mentions and subscribed-thread replies as inbound events', () => {
+test('classifies mentions, subscribed-thread replies, and rollcalls as inbound events', () => {
   assert.equal(isInboundEvent({ type: 'mention' }), true);
   assert.equal(isInboundEvent({ type: 'thread_reply' }), true);
+  assert.equal(isInboundEvent({ type: 'rollcall' }), true);
   assert.equal(isInboundEvent({ type: 'peer_changed' }), false);
+});
+
+test('rollcall steer asks a worker to report or request replacement work when blocked', () => {
+  const prompt = formatInboxSteer([{ type: 'rollcall', peer: 'Nigel', detail: 'Rollcall' }]);
+  assert.match(prompt, /respond once in the main place chat/i);
+  assert.match(prompt, /idle or blocked/i);
+  assert.match(prompt, /ask for something else to do/i);
 });
 
 test('holds incoming messages while Pi is busy, then acknowledges them only after delivery', () => {

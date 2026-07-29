@@ -30,6 +30,8 @@ export function formatInboxEvent(e: InboxSteerEvent): string {
       return `💬 ${e.peer} mentioned you: ${e.detail}${e.threadId ? ` [reply in thread ${e.threadId}]` : ''}`;
     case 'thread_reply':
       return `↩ ${e.peer} replied: ${e.detail}${e.threadId ? ` [thread ${e.threadId}]` : ''}`;
+    case 'rollcall':
+      return `📣 ${e.peer} requested a rollcall`;
     default:
       return `${e.type}: ${e.peer}`;
   }
@@ -38,14 +40,18 @@ export function formatInboxEvent(e: InboxSteerEvent): string {
 export function formatInboxSteer(events: InboxSteerEvent[]): string {
   const hasThread = events.some((event) => Boolean(event.threadId));
   const hasTruncatedPreview = events.some((event) => String(event.detail ?? '').trimEnd().endsWith('...'));
+  const hasRollcall = events.some((event) => event.type === 'rollcall');
   const extraInstruction = hasThread || hasTruncatedPreview
     ? '\n\nIf a preview is truncated or includes a thread id, read the full thread with get_messages/find_messages before acting.'
     : '';
+  const responseInstruction = hasRollcall
+    ? 'Respond once in the main place chat with your current activity, or say that you are idle or blocked. If blocked, state the blocker and ask for something else to do.'
+    : 'If the message asks for an acknowledgement, send the ACK, then immediately continue the requested work in this same turn; do not stop after the acknowledgement.';
 
   return [
     'Mycelium — incoming actionable message(s). Treat this as work to handle, not just a notification.',
     events.map(formatInboxEvent).join('\n'),
-    'If the message asks for an acknowledgement, send the ACK, then immediately continue the requested work in this same turn; do not stop after the acknowledgement.',
+    responseInstruction,
   ].join('\n\n') + extraInstruction;
 }
 

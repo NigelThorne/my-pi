@@ -73,7 +73,7 @@ export function retryPrompt(activityId: string, reason: string): string {
 }
 
 export function isInboundEvent(event: { type: string }): boolean {
-  return event.type === 'mention' || event.type === 'thread_reply';
+  return event.type === 'mention' || event.type === 'thread_reply' || event.type === 'rollcall';
 }
 
 export function watchdogDestination(type: WatchdogActionType): 'activity-log' | 'place-chat' | 'fallback' | 'steer' {
