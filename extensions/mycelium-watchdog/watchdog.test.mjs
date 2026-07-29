@@ -27,6 +27,7 @@ function triggerIdleWatchdog() {
 test('watchdog prompts ask whether work is done, blocked, or actually progressing', () => {
   assert.match(recoveryPrompt('activity:auth'), /Are you done, blocked, or actually working/i);
   assert.match(recoveryPrompt('activity:auth'), /Do not merely acknowledge/i);
+  assert.match(recoveryPrompt('activity:auth'), /set_waiting_for/);
   assert.match(retryPrompt('activity:auth', 'ack only'), /Do not acknowledge/i);
 });
 

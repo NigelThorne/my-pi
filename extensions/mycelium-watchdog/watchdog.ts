@@ -62,6 +62,7 @@ export function recoveryPrompt(activityId: string): string {
   return `Mycelium watchdog: you still own active work (${activityId}) and have been idle. ` +
     'Are you done, blocked, or actually working? Continue now with the next concrete tool action. ' +
     'Inspect git status, pending Mycelium replies, work item/thread state, PR/CI, or failed logs as appropriate. ' +
+    'If you are waiting on a person, CI, approval, or another dependency, call set_waiting_for now with the exact condition. ' +
     `${blockingQuestionInstruction(activityId)} ` +
     'Do not merely acknowledge this prompt or say you will do it.';
 }
