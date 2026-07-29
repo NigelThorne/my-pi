@@ -17,6 +17,11 @@ interface InboxState {
   events?: InboxSteerEvent[];
 }
 
+interface WaitingForState {
+  waitingFor?: string;
+  since?: string;
+}
+
 // Inbox delivery needs a short fallback in case a filesystem event is missed.
 // Progress watchdog checks stay deliberately slower: an active agent may be
 // waiting on CI, a human, or another agent and should not be nagged rapidly.
@@ -24,7 +29,7 @@ const INBOX_POLL_MS = 10_000;
 const WATCHDOG_POLL_MS = 60_000;
 
 function isMeaningfulProgressTool(toolName: string): boolean {
-  return /^(read|bash|grep|find|ls|edit|write|ast_|run_tests|webfetch|websearch|pickup_work|pickup_handover|read_work|get_messages|find_messages|get_activities|get_awareness|list_work|view_file|get_page|list_pages|todo_|log|set_my_status|resolve_work|complete_activity|raise|decide|request_access)$/.test(toolName);
+  return /^(read|bash|grep|find|ls|edit|write|ast_|run_tests|webfetch|websearch|pickup_work|pickup_handover|read_work|get_messages|find_messages|get_activities|get_awareness|list_work|view_file|get_page|list_pages|todo_|log|set_my_status|resolve_work|complete_activity|raise|decide|request_access|set_waiting_for|clear_waiting_for)$/.test(toolName);
 }
 
 function myceliumDir(cwd: string): string {
@@ -85,6 +90,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   let agentBusy = false;
   let lastPaneRenameName = '';
   let paneRenameOutcome = '';
+  let lastWaitingPromptAt = 0;
 
   const watchdog = new WorkWatchdog();
   const inboxDispatcher = new InboxEventDispatcher<InboxSteerEvent>();
@@ -93,10 +99,15 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   const inboxPath = () => join(mycDir, `inbox-${sessionId}.json`);
   const inboxLockPath = () => join(mycDir, `nigel-watchdog-inbox-owner-${sessionId}.lock`);
   const pendingInboxPath = () => join(mycDir, `nigel-watchdog-pending-inbox-${sessionId}.json`);
+  const waitingForPath = () => join(mycDir, `waiting-for-${sessionId}.json`);
   const auditPath = () => join(mycDir, `nigel-watchdog-${sessionId}.json`);
 
   async function readInbox(): Promise<InboxState | null> {
     return readJson<InboxState>(inboxPath());
+  }
+
+  async function readWaitingFor(): Promise<WaitingForState | null> {
+    return readJson<WaitingForState>(waitingForPath());
   }
 
   function steer(content: string, reason: string): void {
@@ -217,6 +228,18 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     const activityId = inbox?.self?.activityId;
     const connected = Boolean(inbox || existsSync(join(mycDir, 'connection.json')));
     const now = Date.now();
+    const waitingFor = (await readWaitingFor())?.waitingFor?.trim();
+    if (waitingFor) {
+      if (now - lastWaitingPromptAt >= WATCHDOG_POLL_MS) {
+        lastWaitingPromptAt = now;
+        steer(
+          `Mycelium watchdog: Are you still waiting for “${waitingFor}”? If it resolved or no longer applies, call clear_waiting_for and continue with the next concrete action.`,
+          'waiting-for-check',
+        );
+      }
+      await writeAudit(inbox, 'waiting');
+      return;
+    }
     const piBusy = ctxRef ? !ctxRef.isIdle() : false;
     const recentlyUsedTool = lastToolAt > 0 && now - lastToolAt < 90_000;
     const effectiveAgentBusy = agentBusy || piBusy || recentlyUsedTool;
@@ -276,6 +299,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       lastAssistantPreview,
       failedAttemptCount: watchdog.status(Date.now()).failedAttemptCount ?? 0,
       pendingInboxEventCount: idleInboxDelivery.snapshot().length,
+      waitingFor: (await readWaitingFor())?.waitingFor,
       fallbackOutcome,
       paneRenameName: lastPaneRenameName || undefined,
       paneRenameOutcome: paneRenameOutcome || undefined,
