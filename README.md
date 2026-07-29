@@ -22,6 +22,7 @@ AGENTS.md      # Global workflow preferences (copy to ~/.pi/agent/AGENTS.md)
 SETUP.md       # Step-by-step setup instructions for pi to follow
 extensions/    # Pi extensions (auto-loaded via settings)
 skills/        # Pi skills (auto-loaded via settings)
+prompts/       # Slash prompt templates (loaded via the `prompts` setting)
 agents/        # Subagent definitions (copy to ~/.pi/agent/agents/)
 ```
 
@@ -46,6 +47,10 @@ cp ~/.my-pi/settings.example.json ~/.pi/agent/settings.json
 
 Or merge into your existing `~/.pi/agent/settings.json`.
 
+#### 2. Prompts
+
+`/worker` is a slash prompt template, loaded from `prompts/worker.md` through the configured `prompts` source (`~/.my-pi/prompts` in `settings.example.json`). Discover or edit slash prompts under `prompts/` or your configured prompt directories.
+
 #### 3. Agents
 
 Copy agent definitions for the subagent extension:
@@ -54,6 +59,10 @@ Copy agent definitions for the subagent extension:
 mkdir -p ~/.pi/agent/agents
 cp ~/.my-pi/agents/*.md ~/.pi/agent/agents/
 ```
+
+`/subagent worker <task>` invokes the `worker` subagent profile from `agents/worker.md` through the interactive subagents extension. Discover or edit subagent profiles under `agents/` (and the configured agent directories), not under `prompts/`.
+
+These are complementary entry points: `/worker` starts a prompt-guided session in the current context, while `/subagent worker <task>` launches an isolated worker subagent pane/profile. Neither replaces the other.
 
 #### 4. Extension Dependencies
 
@@ -111,6 +120,8 @@ Async subagent orchestration in multiplexer panes. From [HazAT/pi-interactive-su
 
 **Tools:** `subagent`, `subagents_list`, `set_tab_title`, `subagent_resume`, `write_artifact`, `read_artifact`
 **Commands:** `/plan`, `/iterate`, `/subagent <agent> <task>`
+
+Note: `/subagent worker <task>` selects the `worker` profile from `agents/worker.md`. The separate `/worker` command is a slash prompt template from `prompts/worker.md` (or another configured prompt source).
 
 | Agent | Purpose | Model |
 |-------|---------|-------|
