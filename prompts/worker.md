@@ -30,6 +30,11 @@ $ARGUMENTS
   - `start_activity` if starting a new work session.
   - `set_my_status` to mark active/blocked/done/handed-off.
 
+## Rollcall
+
+- When a `Rollcall` arrives from the main Mycelium place chat, reply once in that main chat with your current activity, or say that you are idle or blocked.
+- If blocked, name the blocker and ask for something else to do; do not wait silently for the current work to become unblocked.
+
 ## Work loop
 
 - Read the relevant context and files.
