@@ -17,7 +17,11 @@ interface InboxState {
   events?: InboxSteerEvent[];
 }
 
-const STATUS_REFRESH_MS = 60_000;
+// Inbox delivery needs a short fallback in case a filesystem event is missed.
+// Progress watchdog checks stay deliberately slower: an active agent may be
+// waiting on CI, a human, or another agent and should not be nagged rapidly.
+const INBOX_POLL_MS = 10_000;
+const WATCHDOG_POLL_MS = 60_000;
 
 function isMeaningfulProgressTool(toolName: string): boolean {
   return /^(read|bash|grep|find|ls|edit|write|ast_|run_tests|webfetch|websearch|pickup_work|pickup_handover|read_work|get_messages|find_messages|get_activities|get_awareness|list_work|view_file|get_page|list_pages|todo_|log|set_my_status|resolve_work|complete_activity|raise|decide|request_access)$/.test(toolName);
@@ -68,7 +72,8 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   let ui: ExtensionContext['ui'] | null = null;
   let ctxRef: ExtensionContext | null = null;
   let inboxWatcher: FSWatcher | null = null;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let inboxTimer: ReturnType<typeof setInterval> | null = null;
+  let watchdogTimer: ReturnType<typeof setInterval> | null = null;
   let ownsInbox = false;
   let currentToolCalls: TurnToolCall[] = [];
   let lastAssistantPreview = '';
@@ -307,11 +312,17 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     maybeRunMyceliumJoinCommand(inbox);
     inboxDispatcher.reset(inbox);
     watchInboxFile();
-    timer = setInterval(() => {
+    // The watcher is normally immediate; this is its short recovery path.
+    inboxTimer = setInterval(() => {
       void handleInboxFileChanged();
+    }, INBOX_POLL_MS);
+    inboxTimer.unref?.();
+
+    // Keep “you have active work but are not progressing” checks conservative.
+    watchdogTimer = setInterval(() => {
       void runWatchdog();
-    }, STATUS_REFRESH_MS);
-    timer.unref?.();
+    }, WATCHDOG_POLL_MS);
+    watchdogTimer.unref?.();
     void writeAudit(inbox);
   });
 
@@ -364,7 +375,8 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
 
   pi.on('session_shutdown', async () => {
     inboxWatcher?.close();
-    if (timer) clearInterval(timer);
+    if (inboxTimer) clearInterval(inboxTimer);
+    if (watchdogTimer) clearInterval(watchdogTimer);
     ui?.setStatus('nigel-mycelium-watchdog', undefined);
     if (ownsInbox) await unlink(inboxLockPath()).catch(() => {});
   });
