@@ -10,7 +10,7 @@ import {
   isInboundEvent,
   watchdogDestination,
 } from './watchdog.ts';
-import { IdleInboxDelivery, formatInboxSteer } from './inbox.ts';
+import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer } from './inbox.ts';
 
 const MINUTE = 60_000;
 
@@ -176,4 +176,15 @@ test('preserves identical actionable messages as distinct deliveries', () => {
 
   delivery.enqueue([message, { ...message }]);
   assert.deepEqual(delivery.peekIfIdle(true), [message, message]);
+});
+
+test('delivers new inbox events after the server trims a full event buffer', async () => {
+  const initial = Array.from({ length: 50 }, (_, index) => ({ type: 'mention', detail: `old-${index}`, ts: `2026-07-29T00:00:${index}` }));
+  const next = [...initial.slice(1), { type: 'mention', detail: 'new-assignment', ts: '2026-07-29T00:01:00' }];
+  const dispatcher = new InboxEventDispatcher({ seq: 1, events: initial });
+  const delivered = [];
+
+  await dispatcher.dispatch(async () => ({ seq: 2, events: next }), (events) => delivered.push(...events));
+
+  assert.deepEqual(delivered, [next.at(-1)]);
 });

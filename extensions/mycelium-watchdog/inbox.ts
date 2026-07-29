@@ -10,6 +10,7 @@ export interface InboxSteerEvent {
   threadId?: string;
   files?: string[];
   pageTitle?: string;
+  ts?: string;
 }
 
 export function formatInboxEvent(e: InboxSteerEvent): string {
@@ -81,17 +82,17 @@ export class IdleInboxDelivery<T> {
 
 export class InboxEventDispatcher<T> {
   private lastSeq: number;
-  private lastEventCount: number;
+  private previousEvents: T[];
   private queue: Promise<void> = Promise.resolve();
 
   constructor(baseline?: InboxSnapshot<T> | null) {
     this.lastSeq = baseline?.seq ?? 0;
-    this.lastEventCount = baseline?.events?.length ?? 0;
+    this.previousEvents = baseline?.events ?? [];
   }
 
   reset(baseline?: InboxSnapshot<T> | null): void {
     this.lastSeq = baseline?.seq ?? 0;
-    this.lastEventCount = baseline?.events?.length ?? 0;
+    this.previousEvents = baseline?.events ?? [];
   }
 
   dispatch(
@@ -102,9 +103,22 @@ export class InboxEventDispatcher<T> {
       const inbox = await read();
       if (!inbox || (inbox.seq ?? 0) === this.lastSeq) return;
       const events = inbox.events ?? [];
-      const fresh = events.slice(this.lastEventCount);
+      // The server caps its event list at 50. Comparing only array length
+      // loses every event after the cap, because each append also drops one.
+      const priorCounts = new Map<string, number>();
+      for (const event of this.previousEvents) {
+        const key = JSON.stringify(event);
+        priorCounts.set(key, (priorCounts.get(key) ?? 0) + 1);
+      }
+      const fresh = events.filter((event) => {
+        const key = JSON.stringify(event);
+        const remaining = priorCounts.get(key) ?? 0;
+        if (remaining === 0) return true;
+        priorCounts.set(key, remaining - 1);
+        return false;
+      });
       this.lastSeq = inbox.seq ?? 0;
-      this.lastEventCount = events.length;
+      this.previousEvents = events;
       if (fresh.length > 0) await onEvents(fresh);
     });
     this.queue = work.catch(() => {});
