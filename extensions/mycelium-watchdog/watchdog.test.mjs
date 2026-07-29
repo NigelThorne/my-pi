@@ -10,6 +10,7 @@ import {
   isInboundEvent,
   watchdogDestination,
 } from './watchdog.ts';
+import { IdleInboxDelivery } from './inbox.ts';
 
 const MINUTE = 60_000;
 
@@ -147,4 +148,24 @@ test('classifies mentions and subscribed-thread replies as inbound events', () =
   assert.equal(isInboundEvent({ type: 'mention' }), true);
   assert.equal(isInboundEvent({ type: 'thread_reply' }), true);
   assert.equal(isInboundEvent({ type: 'peer_changed' }), false);
+});
+
+test('holds incoming messages while Pi is busy, then acknowledges them only after delivery', () => {
+  const delivery = new IdleInboxDelivery();
+  const message = { type: 'mention', peer: 'Nigel', detail: 'Please review this.' };
+
+  delivery.enqueue([message]);
+  assert.deepEqual(delivery.peekIfIdle(false), []);
+  assert.deepEqual(delivery.peekIfIdle(true), [message]);
+  assert.deepEqual(delivery.peekIfIdle(true), [message]);
+  delivery.acknowledge(1);
+  assert.deepEqual(delivery.peekIfIdle(true), []);
+});
+
+test('preserves identical actionable messages as distinct deliveries', () => {
+  const delivery = new IdleInboxDelivery();
+  const message = { type: 'mention', peer: 'Nigel', detail: 'Please review this.' };
+
+  delivery.enqueue([message, { ...message }]);
+  assert.deepEqual(delivery.peekIfIdle(true), [message, message]);
 });

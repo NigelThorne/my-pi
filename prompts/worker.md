@@ -11,13 +11,14 @@ $ARGUMENTS
 ## Start here
 
 1. If not connected to Mycelium, connect to the relevant place before doing work.
-2. If the prompt includes a work id, activity id, handover id, page id, or thread id, start there.
+2. If the prompt includes a work id, activity id, handover id, page id, or thread id, start there and ACK in its activity/work thread; do not post a general readiness message first.
 3. If the prompt is vague, inspect Mycelium before coding:
    - `get_awareness` to see active agents and likely orchestrator.
    - `list_work` to find assigned/open work.
    - `get_activities` to find active work sessions.
    - `get_messages` / `find_messages` to read assignment threads.
-4. Identify the orchestrator as the agent/person who assigned the task, owns the parent workstream/activity, or is coordinating status in the relevant Mycelium thread. If unclear, ask in the activity/work thread who is coordinating.
+4. When launched without an assignment and ready to accept work, introduce yourself once in the Work channel: “Hi, I’m ready for work.”
+5. Identify the orchestrator as the agent/person who assigned the task, owns the parent workstream/activity, or is coordinating status in the relevant Mycelium thread. If unclear, ask in the activity/work thread who is coordinating.
 
 ## Accept and claim
 
