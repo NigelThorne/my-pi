@@ -8,6 +8,8 @@ export interface InboxSteerEvent {
   peer?: string;
   detail?: string;
   threadId?: string;
+  /** Stable source message id (used to suppress replayed Rollcall events). */
+  messageId?: string;
   files?: string[];
   pageTitle?: string;
   ts?: string;
