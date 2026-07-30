@@ -22,6 +22,10 @@ interface WaitingForState {
   since?: string;
 }
 
+interface RollcallState {
+  handledMessageIds?: string[];
+}
+
 // Inbox delivery needs a short fallback in case a filesystem event is missed.
 // Progress watchdog checks stay deliberately slower: an active agent may be
 // waiting on CI, a human, or another agent and should not be nagged rapidly.
@@ -91,6 +95,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   let lastPaneRenameName = '';
   let paneRenameOutcome = '';
   let lastWaitingPromptAt = 0;
+  const handledRollcalls = new Set<string>();
 
   const watchdog = new WorkWatchdog();
   const inboxDispatcher = new InboxEventDispatcher<InboxSteerEvent>();
@@ -100,6 +105,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   const inboxLockPath = () => join(mycDir, `nigel-watchdog-inbox-owner-${sessionId}.lock`);
   const pendingInboxPath = () => join(mycDir, `nigel-watchdog-pending-inbox-${sessionId}.json`);
   const waitingForPath = () => join(mycDir, `waiting-for-${sessionId}.json`);
+  const rollcallStatePath = () => join(mycDir, `nigel-watchdog-rollcalls-${sessionId}.json`);
   const auditPath = () => join(mycDir, `nigel-watchdog-${sessionId}.json`);
 
   async function readInbox(): Promise<InboxState | null> {
@@ -108,6 +114,14 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
 
   async function readWaitingFor(): Promise<WaitingForState | null> {
     return readJson<WaitingForState>(waitingForPath());
+  }
+
+  async function persistHandledRollcalls(): Promise<void> {
+    await writeJsonAtomic(rollcallStatePath(), { handledMessageIds: [...handledRollcalls].slice(-100) }).catch(() => {});
+  }
+
+  function rollcallKey(event: InboxSteerEvent): string {
+    return event.messageId ?? `legacy:${event.peer ?? ''}:${event.detail ?? ''}`;
   }
 
   function steer(content: string, reason: string): void {
@@ -194,8 +208,17 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   async function dispatchInboxEvents(): Promise<void> {
     if (!ownsInbox) return;
     await inboxDispatcher.dispatch(readInbox, async (fresh) => {
-      const incoming = fresh.filter(isInboundEvent);
+      const incoming = fresh.filter(isInboundEvent).filter((event) => {
+        if (event.type !== 'rollcall') return true;
+        const key = rollcallKey(event);
+        if (handledRollcalls.has(key)) return false;
+        // Record before steering: a replay after an extension/server restart must
+        // not make a headless worker announce the same rollcall indefinitely.
+        handledRollcalls.add(key);
+        return true;
+      });
       if (incoming.length === 0) return;
+      await persistHandledRollcalls();
       idleInboxDelivery.enqueue(incoming);
       await persistPendingInbox();
     });
@@ -324,6 +347,8 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     await mkdir(mycDir, { recursive: true }).catch(() => {});
     const pending = await readJson<InboxSteerEvent[]>(pendingInboxPath());
     idleInboxDelivery.enqueue(pending ?? []);
+    const rollcallState = await readJson<RollcallState>(rollcallStatePath());
+    for (const id of rollcallState?.handledMessageIds ?? []) handledRollcalls.add(id);
     try {
       const lock = await open(inboxLockPath(), 'wx');
       await lock.writeFile(String(process.pid));
