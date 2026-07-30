@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import { Type } from 'typebox';
 import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer, type InboxSteerEvent } from './inbox.ts';
 import { WorkWatchdog, recoveryPrompt, retryPrompt, isInboundEvent, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
 
@@ -114,6 +115,16 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
 
   async function readWaitingFor(): Promise<WaitingForState | null> {
     return readJson<WaitingForState>(waitingForPath());
+  }
+
+  async function setWaitingFor(waitingFor: string | null): Promise<void> {
+    if (waitingFor) {
+      await writeJsonAtomic(waitingForPath(), { waitingFor, since: new Date().toISOString() });
+      ui?.setStatus('mycelium-waiting-for', `⏳ Waiting for: ${waitingFor}`);
+    } else {
+      await unlink(waitingForPath()).catch(() => {});
+      ui?.setStatus('mycelium-waiting-for', undefined);
+    }
   }
 
   async function persistHandledRollcalls(): Promise<void> {
@@ -339,6 +350,31 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     }
   }
 
+  pi.registerTool({
+    name: 'set_waiting_for',
+    label: 'Set Waiting For',
+    description: 'Register what you are waiting for. It appears on a dedicated Pi status line and the Mycelium watchdog checks it once a minute.',
+    parameters: Type.Object({
+      waitingFor: Type.String({ minLength: 1, maxLength: 500, description: 'The dependency, person, or event you are waiting for.' }),
+    }),
+    async execute(_toolCallId, params) {
+      const waitingFor = (params as { waitingFor: string }).waitingFor.trim();
+      await setWaitingFor(waitingFor);
+      return { content: [{ type: 'text', text: `Waiting for registered: ${waitingFor}` }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: 'clear_waiting_for',
+    label: 'Clear Waiting For',
+    description: 'Clear the current waiting condition once it is resolved or no longer applies.',
+    parameters: Type.Object({}),
+    async execute() {
+      await setWaitingFor(null);
+      return { content: [{ type: 'text', text: 'Waiting condition cleared.' }], details: {} };
+    },
+  });
+
   pi.on('session_start', async (_event, ctx) => {
     ctxRef = ctx;
     ui = ctx.hasUI ? ctx.ui : null;
@@ -349,6 +385,8 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     idleInboxDelivery.enqueue(pending ?? []);
     const rollcallState = await readJson<RollcallState>(rollcallStatePath());
     for (const id of rollcallState?.handledMessageIds ?? []) handledRollcalls.add(id);
+    const waitingFor = (await readWaitingFor())?.waitingFor?.trim();
+    if (waitingFor) ui?.setStatus('mycelium-waiting-for', `⏳ Waiting for: ${waitingFor}`);
     try {
       const lock = await open(inboxLockPath(), 'wx');
       await lock.writeFile(String(process.pid));
@@ -427,6 +465,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     if (inboxTimer) clearInterval(inboxTimer);
     if (watchdogTimer) clearInterval(watchdogTimer);
     ui?.setStatus('nigel-mycelium-watchdog', undefined);
+    ui?.setStatus('mycelium-waiting-for', undefined);
     if (ownsInbox) await unlink(inboxLockPath()).catch(() => {});
   });
 }
