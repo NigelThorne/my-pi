@@ -52,23 +52,20 @@ const COMPLETION_RE = /\b(done|completed|resolved|fixed|implemented|verified|tes
 const BLOCKING_QUESTION_RE = /\?\s*$|\b(blocked|need (?:a )?(?:decision|permission|access|clarification)|please confirm|can you grant|should i)\b/i;
 
 export function blockingQuestionInstruction(activityId: string): string {
-  return `If blocked, post the question where collaborators will see it: use send_message with activityId \"${activityId}\" (or log if you are already in that activity). ` +
+  return `If blocked, post the question where collaborators will see it: use \`send_message\` with activityId "${activityId}" (or log if you are already in that activity). ` +
     'Address the orchestrator by @mention if you know who is coordinating this work; otherwise @Nigel Thorne. ' +
     'State the specific decision/access/info needed, what you already tried, and what you will do after the answer. ' +
-    'Also call set_my_status with status "blocked" and a short statusText.';
+    'Also call `set_my_status` with status "blocked" and a short statusText and `set_waiting_for` with the condition you are waiting for.';
 }
 
 export function recoveryPrompt(activityId: string): string {
-  return `Mycelium watchdog: you still own active work (${activityId}) and have been idle. ` +
-    'Are you done, blocked, or actually working? Continue now with the next concrete tool action. ' +
-    'Inspect git status, pending Mycelium replies, work item/thread state, PR/CI, or failed logs as appropriate. ' +
-    `${blockingQuestionInstruction(activityId)} ` +
-    'Do not merely acknowledge this prompt or say you will do it.';
+  return `Mycelium watchdog: You still own active work (${activityId}) and have been idle. ` +
+    'If you are not waiting, continue now with the next concrete tool action. ' +
+    `${blockingQuestionInstruction(activityId)} `;
 }
 
 export function retryPrompt(activityId: string, reason: string): string {
-  return `Mycelium watchdog: your previous response did not make progress on active work (${activityId}) — ${reason}. ` +
-    'Do not acknowledge this prompt. Take the next concrete tool action now. ' +
+  return `Mycelium watchdog: Your previous response did not make progress on active work (${activityId}) — ${reason}. ` +
     `${blockingQuestionInstruction(activityId)}`;
 }
 
