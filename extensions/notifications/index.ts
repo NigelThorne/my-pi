@@ -7,7 +7,6 @@
  *
  * Tools:
  *   notify   — Send a system notification with optional sound
- *   ask_user — Play chime + notification + prompt for input
  *
  * Command:
  *   /ping    — Test the chime sound
@@ -161,58 +160,5 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ask_user tool - play chime + notification + prompt user for input
-  pi.registerTool({
-    name: "ask_user",
-    label: "Ask User",
-    description:
-      "Play a notification chime, show a system notification, and prompt the user for input. Use this when you need the user's attention and a response. The user will hear a sound and see a notification, then can type their answer.",
-    parameters: Type.Object({
-      question: Type.String({
-        description: "The question to ask the user",
-      }),
-    }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      playChime();
-      showNotification(params.question, "pi needs your input");
-
-      const answer = await ctx.ui.input(params.question, "");
-
-      if (answer === undefined || answer === null) {
-        return {
-          content: [{ type: "text", text: "User dismissed the prompt without answering." }],
-          details: { question: params.question, answer: null },
-        };
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `User answered: ${answer}`,
-          },
-        ],
-        details: { question: params.question, answer },
-      };
-    },
-
-    renderCall(args, theme) {
-      let text = theme.fg("toolTitle", theme.bold("ask_user "));
-      text += theme.fg("muted", `"${args.question}"`);
-      return new Text(text, 0, 0);
-    },
-
-    renderResult(result, _options, theme) {
-      const answer = (result.details as { answer?: string | null } | undefined)?.answer;
-      if (answer === null || answer === undefined) {
-        return new Text(theme.fg("warning", "⚠ User dismissed prompt"), 0, 0);
-      }
-      return new Text(
-        theme.fg("success", "✓ ") + theme.fg("dim", `"${answer}"`),
-        0,
-        0
-      );
-    },
-  });
 }
