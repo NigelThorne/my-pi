@@ -61,6 +61,10 @@ export function resolveCurrentActivityId(
   return inboxActivityId;
 }
 
+export function shouldCheckWaitingFor(activityId: string | undefined): boolean {
+  return Boolean(activityId);
+}
+
 const HELP_AFTER_MS = 2 * 60_000;
 const UPDATE_EVERY_MS = 2 * 60_000;
 const ESCALATE_AFTER_MS = 10 * 60_000;

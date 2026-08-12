@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from 'typebox';
 import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer, type InboxSteerEvent } from './inbox.ts';
-import { WorkWatchdog, recoveryPrompt, retryPrompt, isInboundEvent, resolveCurrentActivityId, selectFreshestSessionCandidate, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
+import { WorkWatchdog, recoveryPrompt, retryPrompt, isInboundEvent, resolveCurrentActivityId, selectFreshestSessionCandidate, shouldCheckWaitingFor, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
 
 interface InboxState {
   sourceSessionId?: string;
@@ -284,7 +284,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     const connected = Boolean(inbox || existsSync(join(mycDir, 'connection.json')));
     const now = Date.now();
     const waitingFor = (await readWaitingFor())?.waitingFor?.trim();
-    if (waitingFor) {
+    if (waitingFor && shouldCheckWaitingFor(activityId)) {
       if (now - lastWaitingPromptAt >= WATCHDOG_POLL_MS) {
         lastWaitingPromptAt = now;
         steer(
