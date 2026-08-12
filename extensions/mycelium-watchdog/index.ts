@@ -1,14 +1,15 @@
 import { existsSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from 'typebox';
 import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer, type InboxSteerEvent } from './inbox.ts';
-import { WorkWatchdog, recoveryPrompt, retryPrompt, isInboundEvent, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
+import { WorkWatchdog, recoveryPrompt, retryPrompt, isInboundEvent, resolveCurrentActivityId, selectFreshestSessionCandidate, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
 
 interface InboxState {
+  sourceSessionId?: string;
   seq?: number;
   self?: {
     displayName?: string;
@@ -25,6 +26,10 @@ interface WaitingForState {
 
 interface RollcallState {
   handledMessageIds?: string[];
+}
+
+interface CursorState {
+  currentActivity?: string | null;
 }
 
 // Inbox delivery needs a short fallback in case a filesystem event is missed.
@@ -88,6 +93,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   let currentToolCalls: TurnToolCall[] = [];
   let lastAssistantPreview = '';
   let lastTurnAt = 0;
+  let lastUserInputAt = 0;
   let lastToolAt = 0;
   let lastSteerAt = 0;
   let lastSteerReason = '';
@@ -102,7 +108,9 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   const inboxDispatcher = new InboxEventDispatcher<InboxSteerEvent>();
   const idleInboxDelivery = new IdleInboxDelivery<InboxSteerEvent>();
 
-  const inboxPath = () => join(mycDir, `inbox-${sessionId}.json`);
+  const inboxSessionIds = () => [...new Set([sessionId, sessionId.replace(/^pi_/, '')])];
+  const inboxPathFor = (candidateSessionId: string) => join(mycDir, `inbox-${candidateSessionId}.json`);
+  const cursorPathFor = (candidateSessionId: string) => join(mycDir, `cursor-${candidateSessionId}.json`);
   const inboxLockPath = () => join(mycDir, `nigel-watchdog-inbox-owner-${sessionId}.lock`);
   const pendingInboxPath = () => join(mycDir, `nigel-watchdog-pending-inbox-${sessionId}.json`);
   const waitingForPath = () => join(mycDir, `waiting-for-${sessionId}.json`);
@@ -110,7 +118,20 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   const auditPath = () => join(mycDir, `nigel-watchdog-${sessionId}.json`);
 
   async function readInbox(): Promise<InboxState | null> {
-    return readJson<InboxState>(inboxPath());
+    const candidates = await Promise.all(inboxSessionIds().map(async (candidateSessionId) => ({
+      sessionId: candidateSessionId,
+      modifiedAt: await stat(inboxPathFor(candidateSessionId)).then((value) => value.mtimeMs).catch(() => Number.NEGATIVE_INFINITY),
+    })));
+    const freshestSessionId = selectFreshestSessionCandidate(candidates);
+    if (!freshestSessionId || !Number.isFinite(candidates.find((candidate) => candidate.sessionId === freshestSessionId)?.modifiedAt)) return null;
+    const inbox = await readJson<InboxState>(inboxPathFor(freshestSessionId));
+    return inbox && { ...inbox, sourceSessionId: freshestSessionId };
+  }
+
+  async function readCurrentActivityId(inbox?: InboxState | null): Promise<string | undefined> {
+    const sourceSessionId = inbox?.sourceSessionId;
+    const cursor = sourceSessionId ? await readJson<CursorState>(cursorPathFor(sourceSessionId)) : null;
+    return resolveCurrentActivityId(inbox?.self?.activityId ?? undefined, cursor);
   }
 
   async function readWaitingFor(): Promise<WaitingForState | null> {
@@ -244,7 +265,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
 
     const inbox = await readInbox();
     maybeRunMyceliumJoinCommand(inbox);
-    const activityId = inbox?.self?.activityId;
+    const activityId = await readCurrentActivityId(inbox);
     if (activityId) watchdog.expectProgress(activityId, Date.now());
     try {
       steer(formatInboxSteer(incoming), 'inbox-actionable-message');
@@ -259,7 +280,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   async function runWatchdog(): Promise<void> {
     const inbox = await readInbox();
     maybeRunMyceliumJoinCommand(inbox);
-    const activityId = inbox?.self?.activityId;
+    const activityId = await readCurrentActivityId(inbox);
     const connected = Boolean(inbox || existsSync(join(mycDir, 'connection.json')));
     const now = Date.now();
     const waitingFor = (await readWaitingFor())?.waitingFor?.trim();
@@ -317,7 +338,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     await mkdir(mycDir, { recursive: true }).catch(() => {});
     await writeJsonAtomic(auditPath(), {
       sessionId,
-      activityId: currentInbox?.self?.activityId,
+      activityId: await readCurrentActivityId(currentInbox),
       activityLabel: currentInbox?.self?.activityLabel,
       lastPollAt: new Date().toISOString(),
       agentBusy: agentBusy || Boolean(ctxRef && !ctxRef.isIdle()),
@@ -328,6 +349,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
       lastSteerAt: lastSteerAt ? new Date(lastSteerAt).toISOString() : undefined,
       lastSteerReason,
       lastTurnAt: lastTurnAt ? new Date(lastTurnAt).toISOString() : undefined,
+      lastUserInputAt: lastUserInputAt ? new Date(lastUserInputAt).toISOString() : undefined,
       lastToolAt: lastToolAt ? new Date(lastToolAt).toISOString() : undefined,
       lastTurnToolCalls: currentToolCalls.map((call) => call.name),
       lastAssistantPreview,
@@ -343,7 +365,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   function watchInboxFile(): void {
     try {
       inboxWatcher = watch(mycDir, { persistent: false }, (_event, filename) => {
-        if (filename === `inbox-${sessionId}.json`) void handleInboxFileChanged();
+        if (inboxSessionIds().some((candidateSessionId) => filename === `inbox-${candidateSessionId}.json`)) void handleInboxFileChanged();
       });
     } catch {
       // Timer also polls the inbox.
@@ -413,6 +435,16 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     void writeAudit(inbox);
   });
 
+  pi.on('input', async (event) => {
+    if (event.source === 'extension') return undefined;
+    lastUserInputAt = Date.now();
+    const inbox = await readInbox();
+    const activityId = await readCurrentActivityId(inbox);
+    if (activityId) watchdog.observeUserInteraction(activityId, lastUserInputAt);
+    void writeAudit(inbox);
+    return undefined;
+  });
+
   pi.on('before_agent_start', async () => {
     agentBusy = true;
     currentToolCalls = [];
@@ -428,7 +460,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     if (isMeaningfulProgressTool(event.toolName)) {
       const inbox = await readInbox();
       maybeRunMyceliumJoinCommand(inbox);
-      const activityId = inbox?.self?.activityId;
+      const activityId = await readCurrentActivityId(inbox);
       if (activityId) watchdog.observeProgress(activityId, lastToolAt);
       void writeAudit(inbox);
     }
@@ -441,7 +473,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     const inbox = await readInbox();
     maybeRunMyceliumJoinCommand(inbox);
     const actions = watchdog.observeTurnResult({
-      activityId: inbox?.self?.activityId,
+      activityId: await readCurrentActivityId(inbox),
       assistantText: lastAssistantPreview,
       toolCalls: currentToolCalls,
       now: Date.now(),
