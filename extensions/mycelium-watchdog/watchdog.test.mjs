@@ -11,6 +11,7 @@ import {
   watchdogDestination,
   selectFreshestSessionCandidate,
   resolveCurrentActivityId,
+  shouldCheckWaitingFor,
 } from './watchdog.ts';
 import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer } from './inbox.ts';
 
@@ -73,6 +74,11 @@ test('cursor ownership overrides stale inbox activity metadata', () => {
   assert.equal(resolveCurrentActivityId('activity:stale', { currentActivity: null }), undefined);
   assert.equal(resolveCurrentActivityId('activity:stale', { currentActivity: 'activity:current' }), 'activity:current');
   assert.equal(resolveCurrentActivityId('activity:legacy', null), 'activity:legacy');
+});
+
+test('waiting checks require current activity ownership', () => {
+  assert.equal(shouldCheckWaitingFor(undefined), false);
+  assert.equal(shouldCheckWaitingFor('activity:auth'), true);
 });
 
 test('user conversation restarts the idle timer', () => {
