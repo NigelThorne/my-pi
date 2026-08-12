@@ -9,6 +9,8 @@ import {
   blockingQuestionInstruction,
   isInboundEvent,
   watchdogDestination,
+  selectFreshestSessionCandidate,
+  resolveCurrentActivityId,
 } from './watchdog.ts';
 import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer } from './inbox.ts';
 
@@ -54,6 +56,45 @@ test('classifies meaningful tool calls as progress', () => {
 test('classifies focused blocking questions or blocked status as blocked', () => {
   assert.equal(classifyTurn({ activityId: 'activity:auth', assistantText: 'I am blocked because production access is required.', toolCalls: [], now: 0 }), 'blocked');
   assert.equal(classifyTurn({ activityId: 'activity:auth', assistantText: 'Should I make the production change now?', toolCalls: [], now: 0 }), 'blocked');
+});
+
+test('selects the freshest Mycelium session record across legacy prefixed identities', () => {
+  assert.equal(
+    selectFreshestSessionCandidate([
+      { sessionId: 'pi_session-1', modifiedAt: 100 },
+      { sessionId: 'session-1', modifiedAt: 200 },
+    ]),
+    'session-1',
+  );
+  assert.equal(selectFreshestSessionCandidate([{ sessionId: 'pi_session-1', modifiedAt: 100 }]), 'pi_session-1');
+});
+
+test('cursor ownership overrides stale inbox activity metadata', () => {
+  assert.equal(resolveCurrentActivityId('activity:stale', { currentActivity: null }), undefined);
+  assert.equal(resolveCurrentActivityId('activity:stale', { currentActivity: 'activity:current' }), 'activity:current');
+  assert.equal(resolveCurrentActivityId('activity:legacy', null), 'activity:legacy');
+});
+
+test('user conversation restarts the idle timer', () => {
+  const watchdog = new WorkWatchdog();
+  watchdog.observe({ now: 0, activityId: 'activity:auth', agentBusy: false, connected: true });
+  watchdog.observeUserInteraction('activity:auth', 90_000);
+
+  assert.deepEqual(
+    watchdog.poll({ now: 2 * MINUTE, activityId: 'activity:auth', agentBusy: false, connected: true }),
+    [],
+  );
+  assert.deepEqual(
+    watchdog.poll({ now: 210_000, activityId: 'activity:auth', agentBusy: false, connected: true }),
+    [{ type: 'thread-help', activityId: 'activity:auth' }],
+  );
+});
+
+test('user conversation clears a pending idle prompt', () => {
+  const watchdog = triggerIdleWatchdog();
+  watchdog.observeUserInteraction('activity:auth', 3 * MINUTE);
+
+  assert.deepEqual(watchdog.status(3 * MINUTE), { phase: 'thread-help', nextActionAt: 5 * MINUTE, failedAttemptCount: 0 });
 });
 
 test('does not reset merely because the agent becomes busy', () => {

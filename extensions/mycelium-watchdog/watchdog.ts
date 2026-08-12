@@ -41,6 +41,26 @@ export interface TurnResult {
   now: number;
 }
 
+export interface SessionCandidate {
+  sessionId: string;
+  modifiedAt: number;
+}
+
+export function selectFreshestSessionCandidate(candidates: SessionCandidate[]): string | undefined {
+  return candidates.reduce<SessionCandidate | undefined>(
+    (freshest, candidate) => !freshest || candidate.modifiedAt > freshest.modifiedAt ? candidate : freshest,
+    undefined,
+  )?.sessionId;
+}
+
+export function resolveCurrentActivityId(
+  inboxActivityId: string | undefined,
+  cursor: { currentActivity?: string | null } | null,
+): string | undefined {
+  if (cursor) return cursor.currentActivity ?? undefined;
+  return inboxActivityId;
+}
+
 const HELP_AFTER_MS = 2 * 60_000;
 const UPDATE_EVERY_MS = 2 * 60_000;
 const ESCALATE_AFTER_MS = 10 * 60_000;
@@ -206,6 +226,10 @@ export class WorkWatchdog {
       this.activityId = activityId;
     }
     this.markProgress(now, false);
+  }
+
+  observeUserInteraction(activityId: string, now: number): void {
+    this.observeProgress(activityId, now);
   }
 
   observeAgentBusy(): void {
