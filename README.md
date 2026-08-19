@@ -148,11 +148,11 @@ Features:
 
 ### pass-the-buck/
 
-Starts an independent successor Pi session in a Zellij pane and hands it the current conversation without forcing a lossy compaction.
+Starts an independent successor Pi session in a Zellij pane with a compact, generated checkpoint rather than the active conversation.
 
 **Command:** `/pass-the-buck [optional successor objective]`
 
-The successor starts as a fork of the active session, so it receives the complete session context, project configuration, and shared working directory. It must use `pass_the_buck_take_over` once it is ready to own the work. Until then it can call `pass_the_buck_ask` to ask the predecessor questions; the predecessor replies with `pass_the_buck_reply`.
+The command summarizes the active effective context (including any existing compaction summaries) into a self-contained handoff checkpoint, then starts a fresh Pi session with that checkpoint, the project configuration, and the shared working directory. It must use `pass_the_buck_take_over` once it is ready to own the work. Until then it can call `pass_the_buck_ask` to ask the predecessor questions; the predecessor replies with `pass_the_buck_reply`.
 
 After takeover, the predecessor runs `/retro` when at least 20% (and 16K tokens) of its context window remains; otherwise it exits gracefully. The relay is durable at `~/.pi/agent/pass-the-buck/`, allowing the sessions to survive a reload while the handoff is in progress.
 

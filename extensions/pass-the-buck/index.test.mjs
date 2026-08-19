@@ -43,6 +43,7 @@ function makeContext({
       getSessionId: () => sessionId,
       getSessionFile: () => sessionFile,
       getEntries: () => [],
+      buildContextEntries: () => [{ type: "message", message: { role: "user", content: "Current task details" } }],
     },
     getContextUsage: () => ({ tokens: contextTokens }),
     shutdown: () => { shutdowns += 1; },
@@ -60,15 +61,21 @@ async function setup(t, options = {}) {
   mod.createPassTheBuckExtension(pi, {
     relayRoot,
     createHandoffId: () => "handoff-test",
+    summarizeHandoff: async () => "Default handoff checkpoint.",
     pollIntervalMs: 5,
     ...options,
   });
   return { mod, pi, relayRoot };
 }
 
-test("/pass-the-buck creates a relay and launches an independent forked Pi session", async (t) => {
+test("/pass-the-buck launches a fresh successor with a generated handoff checkpoint", async (t) => {
   const launches = [];
+  const summaries = [];
   const { pi, relayRoot } = await setup(t, {
+    summarizeHandoff: async (input) => {
+      summaries.push(input);
+      return "## Goal\nFinish the current feature\n\n## Progress\nRelay is implemented.";
+    },
     launchSuccessor: (launch) => launches.push(launch),
   });
   const ctx = makeContext();
@@ -78,11 +85,18 @@ test("/pass-the-buck creates a relay and launches an independent forked Pi sessi
   const protocol = JSON.parse(fs.readFileSync(path.join(relayRoot, "handoff-test", "protocol.json"), "utf8"));
   assert.equal(protocol.predecessor.sessionId, "previous");
   assert.equal(protocol.request, "finish the current feature");
+  assert.match(protocol.summary, /Relay is implemented/);
+  assert.equal(fs.statSync(path.join(relayRoot, "handoff-test", "protocol.json")).mode & 0o777, 0o600);
   assert.equal(protocol.successor.sessionId, "handoff-test");
+  assert.deepEqual(summaries, [{
+    cwd: "/work/project",
+    entries: [{ type: "message", message: { role: "user", content: "Current task details" } }],
+    request: "finish the current feature",
+  }]);
   assert.equal(launches.length, 1);
-  assert.equal(launches[0].predecessorSessionFile, "/tmp/previous.jsonl");
   assert.equal(launches[0].successorSessionId, "handoff-test");
-  assert.match(launches[0].prompt, /full conversation was forked/i);
+  assert.match(launches[0].prompt, /Relay is implemented/);
+  assert.doesNotMatch(launches[0].prompt, /full conversation was forked/i);
   assert.match(launches[0].prompt, /pass_the_buck_ask/i);
   assert.deepEqual(ctx.notifications, [{ message: "Successor session launched. Waiting for handoff questions or takeover.", type: "info" }]);
 });
@@ -105,7 +119,22 @@ test("successor launch preserves extension-critical PTC environment variables", 
   });
 
   assert.match(command, /PTC_USE_DOCKER='1'/);
-  assert.match(command, /--session-id 'successor' --fork '\/tmp\/previous\.jsonl'/);
+  assert.match(command, /--session-id 'successor'/);
+  assert.doesNotMatch(command, /--fork/);
+
+  const summaryArgs = mod.__test__.summarizerArgs("/tmp/context.json");
+  assert.deepEqual(summaryArgs.slice(0, 7), [
+    "--print",
+    "--no-session",
+    "--no-tools",
+    "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-context-files",
+  ]);
+  assert.ok(summaryArgs.includes("--offline"));
+  assert.ok(summaryArgs.includes("@/tmp/context.json"));
+  assert.equal(mod.__test__.SUMMARIZER_TIMEOUT_MS, 120_000);
 });
 
 test("successor can ask the predecessor a question and receive its reply", async (t) => {
@@ -116,6 +145,7 @@ test("successor can ask the predecessor a question and receive its reply", async
     successor: { sessionId: "successor" },
     cwd: "/work/project",
     request: "continue",
+    summary: "Default handoff checkpoint.",
   });
   const original = process.env.PI_PASS_THE_BUCK_HANDOFF_ID;
   process.env.PI_PASS_THE_BUCK_HANDOFF_ID = "handoff-test";
@@ -196,6 +226,7 @@ test("predecessor shuts down instead of running retro when context headroom is l
     successor: { sessionId: "successor" },
     cwd: "/work/project",
     request: "continue",
+    summary: "Default handoff checkpoint.",
   });
   const ctx = makeContext({ contextTokens: 190_000, contextWindow: 200_000 });
   await pi.handlers.get("session_start")({ reason: "startup" }, ctx);

@@ -1,19 +1,21 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 const RELAY_ENV = "PI_PASS_THE_BUCK_HANDOFF_ID";
 const MIN_RETRO_TOKENS = 16_384;
 const DEFAULT_POLL_INTERVAL_MS = 750;
+const SUMMARIZER_TIMEOUT_MS = 120_000;
 
 type HandoffProtocol = {
   handoffId: string;
   createdAt: string;
   cwd: string;
   request: string;
+  summary: string;
   predecessor: { sessionId: string; sessionFile: string };
   status?: "pending" | "taken-over";
   successor: { sessionId: string };
@@ -32,15 +34,21 @@ type RelayEvent = {
 type LaunchOptions = {
   handoffId: string;
   cwd: string;
-  predecessorSessionFile: string;
   successorSessionId: string;
   prompt: string;
+};
+
+type HandoffSummaryInput = {
+  cwd: string;
+  entries: unknown[];
+  request: string;
 };
 
 type ExtensionOptions = {
   relayRoot?: string;
   createHandoffId?: () => string;
   launchSuccessor?: (options: LaunchOptions) => void;
+  summarizeHandoff?: (input: HandoffSummaryInput) => Promise<string> | string;
   pollIntervalMs?: number;
 };
 
@@ -66,7 +74,7 @@ function eventsPath(relayRoot: string, handoffId: string): string {
 function writeJsonAtomically(filePath: string, value: unknown): void {
   mkdirSync(dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   renameSync(temporaryPath, filePath);
 }
 
@@ -109,7 +117,7 @@ function appendEvent(
     timestamp: event.timestamp ?? new Date().toISOString(),
   };
   mkdirSync(dirname(eventsPath(relayRoot, handoffId)), { recursive: true });
-  appendFileSync(eventsPath(relayRoot, handoffId), `${JSON.stringify(complete)}\n`, "utf8");
+  appendFileSync(eventsPath(relayRoot, handoffId), `${JSON.stringify(complete)}\n`, { encoding: "utf8", mode: 0o600 });
   return complete;
 }
 
@@ -136,12 +144,53 @@ function shellEscape(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+const HANDOFF_SUMMARY_PROMPT = `Create a concise, self-contained checkpoint for a fresh Pi session taking over this coding task. The attached JSON contains the current effective Pi context, including any earlier compaction summaries and recent work. The successor will not receive the original conversation.
+
+Capture the goal, completed work, current working-tree state, key decisions, exact paths and commands, verification results, unresolved failures/blockers, and the next concrete steps. Preserve facts; do not invent work or claim verification that did not happen. Keep it focused and sufficiently detailed for autonomous continuation. Return only the checkpoint in Markdown.`;
+
+function summarizerArgs(contextFile: string): string[] {
+  return [
+    "--print",
+    "--no-session",
+    "--no-tools",
+    "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-context-files",
+    "--offline",
+    `@${contextFile}`,
+    HANDOFF_SUMMARY_PROMPT,
+  ];
+}
+
+function summarizeHandoff(input: HandoffSummaryInput): string {
+  const directory = mkdtempSync(join(tmpdir(), "pi-pass-the-buck-context-"));
+  const contextFile = join(directory, "context.json");
+  try {
+    writeFileSync(contextFile, JSON.stringify({ request: input.request, entries: input.entries }), { encoding: "utf8", mode: 0o600 });
+    const summary = execFileSync("pi", summarizerArgs(contextFile), {
+      cwd: input.cwd,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout: SUMMARIZER_TIMEOUT_MS,
+    }).trim();
+    if (!summary) throw new Error("The handoff summarizer returned an empty checkpoint.");
+    return summary;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function successorPrompt(protocol: HandoffProtocol): string {
-  return `You are taking over an active coding task from another independent Pi session. The full conversation was forked into this session, so it is your primary context; the shared working directory contains the same files and changes.
+  return `You are taking over an active coding task from another independent Pi session. This is a fresh session: you did not inherit the predecessor's conversation. The shared working directory contains the same files and changes.
 
-The predecessor's handoff request was: ${protocol.request || "Continue the work already underway."}
+## Handoff objective
+${protocol.request || "Continue the work already underway."}
 
-Before starting new work, assess the active task and any unresolved decisions. You may call pass_the_buck_ask to ask the predecessor any focused question; wait for its response if you do. Once you have enough context and accept ownership, call pass_the_buck_take_over with a concise summary. Then continue the work autonomously. Do not call pass_the_buck_take_over until you are genuinely ready to own the task.`;
+## Context checkpoint from the predecessor
+${protocol.summary}
+
+Before starting new work, assess the checkpoint and any unresolved decisions. You may call pass_the_buck_ask to ask the predecessor a focused question; wait for its response if you do. Once you have enough context and accept ownership, call pass_the_buck_take_over with a concise summary. Then continue the work autonomously. Do not call pass_the_buck_take_over until you are genuinely ready to own the task.`;
 }
 
 function successorCommand(options: LaunchOptions): string {
@@ -151,7 +200,7 @@ function successorCommand(options: LaunchOptions): string {
   const environment = [`${RELAY_ENV}=${shellEscape(options.handoffId)}`, ...propagated].join(" ");
   return [
     `cd ${shellEscape(options.cwd)}`,
-    `${environment} pi --session-id ${shellEscape(options.successorSessionId)} --fork ${shellEscape(options.predecessorSessionFile)} ${shellEscape(options.prompt)}`,
+    `${environment} pi --session-id ${shellEscape(options.successorSessionId)} ${shellEscape(options.prompt)}`,
   ].join(" && ");
 }
 
@@ -250,6 +299,7 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   const relayRoot = options.relayRoot ?? defaultRelayRoot();
   const createHandoffId = options.createHandoffId ?? (() => randomUUID());
   const launchSuccessor = options.launchSuccessor ?? launchInZellij;
+  const createHandoffSummary = options.summarizeHandoff ?? summarizeHandoff;
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const consumedEventIds = new Set<string>();
   let poller: NodeJS.Timeout | undefined;
@@ -307,12 +357,27 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
         return;
       }
 
+      const request = args.trim() || "Continue the work already underway.";
+      let summary: string;
+      try {
+        summary = await createHandoffSummary({
+          cwd: ctx.cwd,
+          entries: ctx.sessionManager.buildContextEntries?.() ?? ctx.sessionManager.getEntries?.() ?? [],
+          request,
+        });
+        if (!summary.trim()) throw new Error("The handoff summarizer returned an empty checkpoint.");
+      } catch (error) {
+        ctx.ui.notify(`Could not generate a handoff checkpoint: ${error instanceof Error ? error.message : String(error)}`, "error");
+        return;
+      }
+
       const handoffId = createHandoffId();
       const protocol = writeProtocol(relayRoot, {
         handoffId,
         cwd: ctx.cwd,
         status: "pending",
-        request: args.trim() || "Continue the work already underway.",
+        request,
+        summary,
         predecessor: { sessionId: predecessorSessionId, sessionFile: predecessorSessionFile },
         successor: { sessionId: handoffId },
       });
@@ -321,7 +386,6 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
         launchSuccessor({
           handoffId,
           cwd: ctx.cwd,
-          predecessorSessionFile,
           successorSessionId: handoffId,
           prompt: successorPrompt(protocol),
         });
@@ -401,7 +465,7 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   pi.on("session_shutdown", async () => stopPolling());
 }
 
-export const __test__ = { writeProtocol, appendEvent, readEvents, successorCommand };
+export const __test__ = { writeProtocol, appendEvent, readEvents, successorCommand, summarizerArgs, SUMMARIZER_TIMEOUT_MS };
 
 export default function passTheBuckExtension(pi: ExtensionAPI): void {
   createPassTheBuckExtension(pi);
