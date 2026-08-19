@@ -82,3 +82,38 @@ test("session-view renders messages from an explicit session file", () => {
   assert.match(result.stdout, /Session: .*session\.jsonl/);
   assert.match(result.stdout, /User: Hello/);
 });
+
+test("retro sends its reflection prompt without a command error", () => {
+  const result = spawnSync(
+    "pi",
+    [
+      "--mode",
+      "rpc",
+      "--no-session",
+      "--no-extensions",
+      "--no-context-files",
+      "--no-skills",
+      "--no-prompt-templates",
+      "--no-themes",
+      "--extension",
+      extensionPath,
+    ],
+    {
+      cwd: process.env.HOME,
+      encoding: "utf8",
+      input: `${JSON.stringify({
+        id: "retro",
+        type: "prompt",
+        message: "/retro",
+      })}\n`,
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout.includes('"type":"extension_error"'),
+    false,
+    result.stdout,
+  );
+  assert.match(result.stdout, /Retro prompt sent/);
+});

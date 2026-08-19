@@ -32,7 +32,7 @@ agents/        # Subagent definitions (source of truth; optionally copied to ~/.
 
 ```bash
 git clone https://github.com/NigelThorne/my-pi ~/.my-pi
-cd ~/.my-pi && pi "Read SETUP.md and walk me through setting up pi with my custom extensions, skills, and agents. Do each step, ask me for input when needed (API keys, versions), and verify everything works at the end."
+cd ~/.my-pi && pi "Read SETUP.md and walk me through setting up pi with my custom extensions, skills, prompts, and agents. Do each step, ask me for input when needed (API keys, versions), and verify everything works at the end."
 ```
 
 ### Manual Setup
@@ -49,7 +49,7 @@ Or merge into your existing `~/.pi/agent/settings.json`.
 
 #### 2. Prompts
 
-`/worker` is a slash prompt template, loaded from `prompts/worker.md` through the configured `prompts` source (`~/.my-pi/prompts` in `settings.example.json`). Discover or edit slash prompts under `prompts/` or your configured prompt directories.
+`/worker` is the generic coding prompt from `prompts/worker.md`; `/mycelium-worker` is the Mycelium-assignment prompt from `prompts/mycelium-worker.md`. Both are loaded through the configured `prompts` source (`~/.my-pi/prompts` in `settings.example.json`). Discover or edit slash prompts under `prompts/` or your configured prompt directories.
 
 #### 3. Agents
 
@@ -62,9 +62,9 @@ mkdir -p ~/.pi/agent/agents
 cp ~/.my-pi/agents/*.md ~/.pi/agent/agents/
 ```
 
-`/subagent worker <task>` invokes the `worker` subagent profile from `~/.my-pi/agents/worker.md` through the interactive subagents extension. Discover or edit subagent profiles in the source directory `~/.my-pi/agents/`; `~/.pi/agent/agents/` is only a legacy compatibility copy location. Do not edit subagent profiles under `prompts/`.
+`/subagent mycelium-worker <task>` invokes the Mycelium-specific profile from `~/.my-pi/agents/mycelium-worker.md`. The generic `/subagent worker <task>` profile is supplied by the interactive subagents package and does not use Mycelium. A project-local `.pi/agents/<name>.md` can override either profile. Discover or edit custom subagent profiles in `~/.my-pi/agents/`; `~/.pi/agent/agents/` is only a legacy compatibility copy location. Do not edit subagent profiles under `prompts/`.
 
-These are complementary entry points: `/worker` starts a prompt-guided session in the current context, while `/subagent worker <task>` launches an isolated worker subagent pane/profile. Neither replaces the other.
+The `/mycelium-worker` prompt starts a Mycelium-guided session in the current context, while `/subagent mycelium-worker <task>` launches the isolated Mycelium worker profile.
 
 #### 4. Extension Dependencies
 
@@ -96,7 +96,7 @@ Get a free Brave Search API key at https://api-dashboard.search.brave.com/regist
 
 > **Note:** The `websearch` and `webfetch` tools (in `extensions/web-tools/`) require **no API keys** and are the preferred way to search the web and fetch pages.
 
-#### 6. Superpowers Skills
+#### 7. Superpowers Skills
 
 [Superpowers](https://github.com/obra/superpowers) skills are bundled in `skills/` alongside the other skills. No separate installation needed.
 
@@ -123,13 +123,14 @@ Async subagent orchestration in multiplexer panes. From [HazAT/pi-interactive-su
 **Tools:** `subagent`, `subagents_list`, `set_tab_title`, `subagent_resume`, `write_artifact`, `read_artifact`
 **Commands:** `/plan`, `/iterate`, `/subagent <agent> <task>`
 
-Note: `/subagent worker <task>` selects the `worker` profile from the source directory `~/.my-pi/agents/worker.md` (or the legacy compatibility copy at `~/.pi/agent/agents/worker.md` for older extension versions). The separate `/worker` command is a slash prompt template from `prompts/worker.md` (or another configured prompt source).
+Note: `/subagent worker <task>` selects the package's generic implementation profile. `/subagent mycelium-worker <task>` selects the custom Mycelium profile from `~/.my-pi/agents/mycelium-worker.md` (or its legacy compatibility copy), while `/mycelium-worker` is the separate prompt template from `prompts/mycelium-worker.md`.
 
 | Agent | Purpose | Model |
 |-------|---------|-------|
 | `scout` | Fast codebase recon | Haiku 4.5 |
 | `planner` | Brainstorming & planning | Opus (medium thinking) |
-| `worker` | Implementation | Sonnet |
+| `worker` | Generic implementation | Codex GPT-5.4 |
+| `mycelium-worker` | Mycelium assignment implementation | Codex GPT-5.5 |
 | `orchestrator` | Mycelium workstream coordination | Opus |
 | `reviewer` | Code review | Opus (medium thinking) |
 | `visual-tester` | Visual QA via Chrome CDP | Sonnet |

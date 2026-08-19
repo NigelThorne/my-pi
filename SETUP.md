@@ -13,7 +13,7 @@ cp ~/.my-pi/keybindings.json ~/.pi/agent/keybindings.json
 cp ~/.my-pi/AGENTS.md ~/.pi/agent/AGENTS.md
 ```
 
-If `~/.pi/agent/settings.json` already exists, merge in the `extensions`, `skills`, and `packages` arrays rather than overwriting. Keep runtime-only fields such as `lastChangelogVersion` local to `~/.pi/agent/settings.json`; do not commit them.
+If `~/.pi/agent/settings.json` already exists, merge in the `extensions`, `skills`, `prompts`, and `packages` arrays rather than overwriting. Keep runtime-only fields such as `lastChangelogVersion` local to `~/.pi/agent/settings.json`; do not commit them.
 
 ## 2. Agents
 
