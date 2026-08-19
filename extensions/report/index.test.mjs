@@ -1,41 +1,26 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const extensionUrl = new URL("./index.ts", import.meta.url);
+const source = await readFile(extensionUrl, "utf8");
 
-test("/report asks for a concise bullet-point status without starting new work", async () => {
+test("/report runs an isolated report from a snapshot and provides a close command", () => {
   assert.equal(fs.existsSync(extensionUrl), true, "report extension should exist");
 
-  const { default: registerReport } = await import(extensionUrl.href);
-  const commands = new Map();
-  const sentMessages = [];
-  const notifications = [];
-
-  registerReport({
-    registerCommand(name, definition) {
-      commands.set(name, definition);
-    },
-    sendUserMessage(message, options) {
-      sentMessages.push({ message, options });
-    },
-  });
-
-  const report = commands.get("report");
-  assert.ok(report, "report command should be registered");
-
-  await report.handler("", {
-    ui: {
-      notify(message, type) {
-        notifications.push({ message, type });
-      },
-    },
-  });
-
-  assert.equal(sentMessages.length, 1);
-  assert.match(sentMessages[0].message, /Do not start new work/i);
-  assert.match(sentMessages[0].message, /- Plan of attack:/);
-  assert.match(sentMessages[0].message, /- Where I am up to:/);
-  assert.deepEqual(sentMessages[0].options, { deliverAs: "followUp" });
-  assert.deepEqual(notifications, [{ message: "Report prompt sent.", type: "info" }]);
+  assert.match(source, /registerCommand\("report"/, "report command should be registered");
+  assert.match(source, /registerCommand\("report:clear"/, "report close command should be registered");
+  assert.match(source, /buildSessionContext\(/, "report should snapshot Pi's compaction-aware session context");
+  assert.match(source, /ctx\.sessionManager\.getEntries\(\)/, "report should snapshot all session entries");
+  assert.match(source, /ctx\.sessionManager\.getLeafId\(\)/, "report should snapshot the active session leaf");
+  assert.match(source, /new AbortController\(\)/, "report should be cancellable");
+  assert.match(source, /signal: controller\.signal/, "report should pass cancellation to the model stream");
+  assert.match(source, /baseUrl: auth\.baseUrl/, "report should preserve resolved provider base URLs");
+  assert.match(source, /streamSimple\(/, "report should stream its isolated model request");
+  assert.match(source, /setWidget\("report"/, "report should render in its own widget");
+  assert.match(source, /Do not start new work/i);
+  assert.match(source, /- Plan of attack:/);
+  assert.match(source, /- Where I am up to:/);
+  assert.doesNotMatch(source, /pi\.sendUserMessage\(/, "report must not queue work into the main session");
 });
