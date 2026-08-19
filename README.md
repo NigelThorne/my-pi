@@ -146,6 +146,16 @@ Features:
 - Role folders with per-agent `cwd` and config
 - Requires a terminal multiplexer (cmux, tmux, or zellij)
 
+### pass-the-buck/
+
+Starts an independent successor Pi session in a Zellij pane and hands it the current conversation without forcing a lossy compaction.
+
+**Command:** `/pass-the-buck [optional successor objective]`
+
+The successor starts as a fork of the active session, so it receives the complete session context, project configuration, and shared working directory. It must use `pass_the_buck_take_over` once it is ready to own the work. Until then it can call `pass_the_buck_ask` to ask the predecessor questions; the predecessor replies with `pass_the_buck_reply`.
+
+After takeover, the predecessor runs `/retro` when at least 20% (and 16K tokens) of its context window remains; otherwise it exits gracefully. The relay is durable at `~/.pi/agent/pass-the-buck/`, allowing the sessions to survive a reload while the handoff is in progress.
+
 ### mycelium-watchdog/
 
 Personal behavior layer for sessions using `mycelium-pi`. It does not start Mycelium or register Mycelium tools; it reads the existing Mycelium inbox/session files and nudges agents that own active work but are not progressing.
