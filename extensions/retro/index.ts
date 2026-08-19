@@ -5,7 +5,7 @@ import * as path from "node:path";
 
 export default function (pi: ExtensionAPI) {
   const retroDir = path.join(os.homedir(), ".pi", "agent", "retro");
-  const sessionViewScript = path.join(retroDir, "pi-session-view.mjs");
+  const sessionViewScript = path.join(__dirname, "pi-session-view.mjs");
 
   pi.registerCommand("session-view", {
     description: "Pretty-print a pi session by id or path. Flags: --tree --color",
