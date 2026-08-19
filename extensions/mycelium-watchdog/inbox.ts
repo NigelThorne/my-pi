@@ -34,7 +34,7 @@ export function formatInboxEvent(e: InboxSteerEvent): string {
     case 'thread_reply':
       return `↩ ${e.peer} replied: ${e.detail}${e.threadId ? ` [thread ${e.threadId}]` : ''}`;
     case 'rollcall':
-      return `📣 ${e.peer} requested a rollcall`;
+      return `📣 ${e.peer} requested a rollcall${e.detail ? `: ${e.detail}` : ''}`;
     default:
       return `${e.type}: ${e.peer}`;
   }
@@ -44,12 +44,15 @@ export function formatInboxSteer(events: InboxSteerEvent[]): string {
   const hasThread = events.some((event) => Boolean(event.threadId));
   const hasTruncatedPreview = events.some((event) => String(event.detail ?? '').trimEnd().endsWith('...'));
   const hasRollcall = events.some((event) => event.type === 'rollcall');
+  const hasOtherActionableEvent = events.some((event) => event.type !== 'rollcall');
   const extraInstruction = hasThread || hasTruncatedPreview
     ? '\n\nIf a preview is truncated or includes a thread id, read the full thread with get_messages/find_messages before acting.'
     : '';
+  const rollcallInstruction = 'Respond once in the main place chat with your current activity, or say that you are idle or blocked. If blocked, state the blocker and ask for something else to do.';
+  const workInstruction = 'If the message asks for an acknowledgement, send the ACK, then immediately continue the requested work in this same turn; do not stop after the acknowledgement.';
   const responseInstruction = hasRollcall
-    ? 'Respond once in the main place chat with your current activity, or say that you are idle or blocked. If blocked, state the blocker and ask for something else to do.'
-    : 'If the message asks for an acknowledgement, send the ACK, then immediately continue the requested work in this same turn; do not stop after the acknowledgement.';
+    ? hasOtherActionableEvent ? `${rollcallInstruction}\n\n${workInstruction}` : rollcallInstruction
+    : workInstruction;
 
   return [
     'Mycelium — incoming actionable message(s). Treat this as work to handle, not just a notification.',
@@ -112,13 +115,17 @@ export class InboxEventDispatcher<T> {
         const key = JSON.stringify(event);
         priorCounts.set(key, (priorCounts.get(key) ?? 0) + 1);
       }
-      const fresh = events.filter((event) => {
-        const key = JSON.stringify(event);
-        const remaining = priorCounts.get(key) ?? 0;
-        if (remaining === 0) return true;
-        priorCounts.set(key, remaining - 1);
-        return false;
-      });
+      const sequenceDelta = Math.max(0, (inbox.seq ?? this.lastSeq) - this.lastSeq);
+      const rolledCappedBuffer = events.length === 50 && events.length === this.previousEvents.length && sequenceDelta > 0;
+      const fresh = rolledCappedBuffer
+        ? events.slice(-Math.min(sequenceDelta, events.length))
+        : events.filter((event) => {
+          const key = JSON.stringify(event);
+          const remaining = priorCounts.get(key) ?? 0;
+          if (remaining === 0) return true;
+          priorCounts.set(key, remaining - 1);
+          return false;
+        });
       this.lastSeq = inbox.seq ?? 0;
       this.previousEvents = events;
       if (fresh.length > 0) await onEvents(fresh);
