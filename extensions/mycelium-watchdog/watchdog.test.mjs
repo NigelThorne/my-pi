@@ -206,6 +206,17 @@ test('rollcall steer asks a worker to report or request replacement work when bl
   assert.match(prompt, /ask for something else to do/i);
 });
 
+test('mixed rollcall and assignment steering preserves both required actions', () => {
+  const prompt = formatInboxSteer([
+    { type: 'rollcall', peer: 'Nigel', detail: 'Status check' },
+    { type: 'mention', peer: 'Nigel', detail: 'Please continue the assigned work.' },
+  ]);
+
+  assert.match(prompt, /respond once in the main place chat/i);
+  assert.match(prompt, /send the ACK, then immediately continue/i);
+  assert.match(prompt, /Status check/);
+});
+
 test('holds incoming messages while Pi is busy, then acknowledges them only after delivery', () => {
   const delivery = new IdleInboxDelivery();
   const message = { type: 'mention', peer: 'Nigel', detail: 'Please review this.' };
@@ -235,4 +246,16 @@ test('delivers new inbox events after the server trims a full event buffer', asy
   await dispatcher.dispatch(async () => ({ seq: 2, events: next }), (events) => delivered.push(...events));
 
   assert.deepEqual(delivered, [next.at(-1)]);
+});
+
+test('delivers a duplicate event appended after a capped buffer rolls over', async () => {
+  const duplicate = { type: 'rollcall', peer: 'Nigel', detail: 'Status check' };
+  const initial = Array.from({ length: 50 }, () => ({ ...duplicate }));
+  const next = [...initial.slice(1), { ...duplicate }];
+  const dispatcher = new InboxEventDispatcher({ seq: 1, events: initial });
+  const delivered = [];
+
+  await dispatcher.dispatch(async () => ({ seq: 2, events: next }), (events) => delivered.push(...events));
+
+  assert.deepEqual(delivered, [duplicate]);
 });
