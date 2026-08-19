@@ -436,7 +436,7 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
   });
 
   pi.on('input', async (event) => {
-    if (event.source === 'extension') return undefined;
+    if (event.source !== 'interactive' && event.source !== 'rpc') return undefined;
     lastUserInputAt = Date.now();
     const inbox = await readInbox();
     const activityId = await readCurrentActivityId(inbox);

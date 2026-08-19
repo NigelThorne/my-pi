@@ -23,7 +23,8 @@ Spawn async subagents in dedicated multiplexer panes. Fully non-blocking — the
 **Available agents:**
 - `scout` (Haiku 4.5) — Fast codebase recon, returns structured findings for handoff
 - `planner` (Opus, medium thinking) — Brainstorming, clarifies requirements, writes plans, creates todos
-- `worker` (Sonnet) — Implements tasks from todos, writes code, runs tests
+- `worker` (Codex GPT-5.4) — Generic implementation agent; implements tasks from todos, writes code, runs tests
+- `mycelium-worker` (Codex GPT-5.5) — Implements Mycelium assignments and reports progress, blockers, and verification there
 - `orchestrator` (Opus) — Drives Mycelium workstreams to completion by planning, allocating, monitoring, and escalating
 - `reviewer` (Opus, medium thinking) — Code review for bugs, security, correctness
 - `visual-tester` (Sonnet) — Visual QA via Chrome CDP, screenshots, responsive testing
@@ -193,6 +194,10 @@ When using the `edit` tool:
 - “Must match exactly including whitespace” → re-read the file and copy the exact indentation, spacing, and newlines.
 
 ## Git Workflow
+
+### Draft PR safety rule
+
+If an open PR has known breakage, failed verification, or any unresolved blocker that means it cannot responsibly merge, immediately convert it to **Draft**. Only mark it ready for review after the issue is fixed and the relevant verification is satisfactory.
 
 ### `git mm` (merge-master)
 

@@ -112,9 +112,9 @@ If the tool already exists elsewhere in the file, do **not** duplicate it.
 After adding new ideas, read **all existing entries** in \`${missingToolsPath}\` and add votes to any tool you think would have helped in **this specific session**.
 
 Voting rules:
-- Use the existing `(+N)` style already present in the file
+- Use the existing \`(+N)\` style already present in the file
 - If a tool already has votes, increment the count
-- If a tool has no vote count yet, add `(+1)`
+- If a tool has no vote count yet, add \`(+1)\`
 - Vote for every existing tool that plausibly would have saved time, tokens, or money in this session — not just the new ones you added today
 - Do not change descriptions unless needed for a tiny clarification
 - Do not duplicate entries
