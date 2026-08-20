@@ -1,6 +1,7 @@
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import { buildSessionContext, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { parseReportStep } from "./report-format.mjs";
 
 interface ReportSlot {
   thinking: string;
@@ -10,10 +11,12 @@ interface ReportSlot {
 
 const reportPrompt = `Give a concise status report on the work currently underway. Do not start new work or make any changes.
 
-Use exactly these bullet points:
-- Plan of attack: the current plan, including the next concrete step.
-- Where I am up to: completed work, current work, and anything still outstanding.
-- Blockers: anything preventing progress, or "None".`;
+Return only a short Markdown task list. Use one discrete step per line and exactly one of these status tags:
+- [done] completed work
+- [pending] current or next work
+- [blocked] work that cannot proceed, followed by the reason in parentheses
+
+Order the list as: completed work, the current step, the next step, then blockers. Do not add headings, introductory prose, summaries, or filler. Omit blocked items when there are no blockers.`;
 
 export default function (pi: ExtensionAPI) {
   let report: ReportSlot | undefined;
@@ -41,9 +44,21 @@ export default function (pi: ExtensionAPI) {
         parts.push(dim("│ ") + italic(currentReport.thinking) + cursor);
       }
       if (currentReport.answer) {
-        const [firstLine, ...remainingLines] = currentReport.answer.split("\n");
-        parts.push(dim("│ ") + green("› ") + firstLine);
-        if (remainingLines.length > 0) parts.push(remainingLines.join("\n"));
+        for (const line of currentReport.answer.split("\n")) {
+          const step = parseReportStep(line);
+          if (!step) {
+            if (line.startsWith("❌ ")) parts.push(dim("│ ") + yellow(line));
+            continue;
+          }
+
+          if (step.status === "done") {
+            parts.push(dim("│ ") + green("✓ ") + dim(step.text));
+          } else if (step.status === "blocked") {
+            parts.push(dim("│ ") + yellow("⊘ ") + yellow(step.text));
+          } else {
+            parts.push(dim("│ ") + dim("○ ") + step.text);
+          }
+        }
       } else if (!currentReport.thinking) {
         parts.push(dim("│ ") + yellow("⏳ preparing report...") + cursor);
       }
