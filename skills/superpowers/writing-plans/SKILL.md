@@ -96,29 +96,10 @@ git commit -m "feat: add specific feature"
 
 ## Execution Handoff
 
-After saving the plan, offer execution choice:
+After saving the plan, proceed directly with **subagent-driven development** in this session:
 
-**"Plan complete and saved to `docs/plans/<filename>.md`. Three execution options:**
+> Plan complete and saved to `docs/plans/<filename>.md`. I’ll now execute it with fresh subagents and review each task.
 
-**1. Subagent-Driven (this session)** - I dispatch fresh subagent per task, review between tasks, max isolation
-
-**2. Branch-Driven (this session)** - I role-switch with context branching per role, lighter weight, same quality gates
-
-**3. Parallel Session (separate)** - Open new session with executing-plans, batch execution with checkpoints
-
-**Which approach?"**
-
-**If Subagent-Driven chosen:**
-- **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development
-- Stay in this session
-- Fresh subagent per task + code review
-
-**If Branch-Driven chosen:**
-- **REQUIRED SUB-SKILL:** Use superpowers:branch-driven-development
-- Stay in this session
-- Context branching per role (implementer → spec review → quality review)
-- Lower cost than subagents, same two-stage review model
-
-**If Parallel Session chosen:**
-- Guide them to open new session in worktree
-- **REQUIRED SUB-SKILL:** New session uses superpowers:executing-plans
+- **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development.
+- Do **not** present an execution-method menu or ask “Which approach?” Subagent-driven execution is the default, not a decision for the user to repeat.
+- Use a different execution workflow only when the user explicitly asks for it, or explicitly asks for a plan without implementation.
