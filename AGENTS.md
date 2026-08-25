@@ -195,6 +195,10 @@ When using the `edit` tool:
 
 ## Git Workflow
 
+### Trunk-based development for this repository
+
+For this repository, use trunk-based development: work directly on `main`. Do not create or use Git branches or worktrees unless the user explicitly requests them.
+
 ### Draft PR safety rule
 
 If an open PR has known breakage, failed verification, or any unresolved blocker that means it cannot responsibly merge, immediately convert it to **Draft**. Only mark it ready for review after the issue is fixed and the relevant verification is satisfactory.
