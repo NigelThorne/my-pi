@@ -220,3 +220,4 @@ Use it after a PR is merged and you want to continue working on the same branch 
 - Use **subagents** for delegation — scout first, then plan, then implement
 - Search the web with **`websearch`** and fetch pages with **`webfetch`** — prefer these over brave-search
 - Use **`/btw`** for side conversations — ask questions or plan ahead without interrupting the main task
+- Use **`unslop`** before writing or editing prose for people, including responses, docs, plans, release notes, pull requests, and issues. Do not apply it to source code, tool output, or verbatim quotations.
