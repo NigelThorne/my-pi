@@ -102,6 +102,18 @@ Get a free Brave Search API key at https://api-dashboard.search.brave.com/regist
 
 ## Extensions
 
+### pi-session-manager-presence.ts
+
+Publishes exact local presence for every persisted Pi session to `~/.pi/agent/session-manager/live/`. Pi Session Manager uses the atomically written heartbeat to match the session ID and JSONL file path, then displays **Processing** or **Idle** without guessing from CWD.
+
+The extension is loaded automatically because `~/.pi/agent/settings.json` includes `~/.my-pi/extensions`. Run `/reload` or restart already-open Pi sessions to activate it. A clean shutdown publishes a short-lived `stopped` record so the manager does not mistake a recently written JSONL for a live session; stale records are pruned after five minutes.
+
+Test it with:
+
+```bash
+node --test ~/.my-pi/extensions/pi-session-manager-presence.test.mjs
+```
+
 ### todo.ts
 
 Markdown-based todo tracking with dependency support.
