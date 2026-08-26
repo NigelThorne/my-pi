@@ -16,6 +16,7 @@ type LiveSessionPresenceBridgeOptions = {
   now?: () => number;
   terminalPath?: () => string | undefined;
   workspace?: () => string | undefined;
+  zellijPaneID?: () => string | undefined;
   heartbeatIntervalMs?: number;
 };
 
@@ -32,17 +33,23 @@ function workspace(): string | undefined {
   return process.env.ZELLIJ_SESSION_NAME;
 }
 
+function zellijPaneID(): string | undefined {
+  return process.env.ZELLIJ_PANE_ID;
+}
+
 export class LiveSessionPresenceBridge {
   private readonly directory: string;
   private readonly pid: number;
   private readonly now: () => number;
   private readonly getTerminalPath: () => string | undefined;
   private readonly getWorkspace: () => string | undefined;
+  private readonly getZellijPaneID: () => string | undefined;
   private readonly intervalMs: number;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
   private sessionID: string | undefined;
   private tty: string | undefined;
   private currentWorkspace: string | undefined;
+  private currentZellijPaneID: string | undefined;
 
   constructor(options: LiveSessionPresenceBridgeOptions = {}) {
     this.directory = options.directory ?? registryDirectory;
@@ -50,6 +57,7 @@ export class LiveSessionPresenceBridge {
     this.now = options.now ?? Date.now;
     this.getTerminalPath = options.terminalPath ?? terminalPath;
     this.getWorkspace = options.workspace ?? workspace;
+    this.getZellijPaneID = options.zellijPaneID ?? zellijPaneID;
     this.intervalMs = options.heartbeatIntervalMs ?? heartbeatIntervalMs;
   }
 
@@ -58,6 +66,7 @@ export class LiveSessionPresenceBridge {
     this.removeCurrentRecord();
     this.tty = this.getTerminalPath();
     this.currentWorkspace = this.getWorkspace();
+    this.currentZellijPaneID = this.getZellijPaneID();
     this.publish(ctx);
     this.heartbeat = setInterval(() => this.publish(ctx), this.intervalMs);
     this.heartbeat.unref?.();
@@ -82,6 +91,7 @@ export class LiveSessionPresenceBridge {
       pid: this.pid,
       tty: this.tty ?? null,
       workspace: this.currentWorkspace ?? null,
+      zellijPaneID: this.currentZellijPaneID ?? null,
       state,
       updatedAt: this.now(),
     };

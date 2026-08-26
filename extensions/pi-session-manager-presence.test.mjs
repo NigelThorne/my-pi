@@ -24,6 +24,7 @@ test("atomically publishes exact presence, changes state, and cleans up", () => 
     now: () => 10_000,
     terminalPath: () => "/dev/ttys001",
     workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
   });
   const record = join(directory, "session-id.json");
 
@@ -36,6 +37,7 @@ test("atomically publishes exact presence, changes state, and cleans up", () => 
       pid: 123,
       tty: "/dev/ttys001",
       workspace: "manager-session",
+      zellijPaneID: "terminal_11",
       state: "idle",
       updatedAt: 10_000,
     });
