@@ -53,6 +53,25 @@ test("atomically publishes exact presence, changes state, and cleans up", () => 
   }
 });
 
+test("publishes a subagent launch for immediate session-manager indexing", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const launchDirectory = mkdtempSync(join(tmpdir(), "pi-session-manager-launch-"));
+  const bridge = new LiveSessionPresenceBridge({ directory, launchDirectory, pid: 123, now: () => 10_000 });
+
+  try {
+    bridge.publishSubagentLaunch(context(), { details: { sessionFile: "/sessions/child.jsonl" } });
+    assert.deepEqual(JSON.parse(readFileSync(join(launchDirectory, "session-id-child.jsonl.json"), "utf8")), {
+      parentSessionID: "session-id",
+      parentSessionFile: "/sessions/current.jsonl",
+      childSessionFile: "/sessions/child.jsonl",
+      updatedAt: 10_000,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(launchDirectory, { recursive: true, force: true });
+  }
+});
+
 test("encodes session IDs before using them as registry filenames", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const bridge = new LiveSessionPresenceBridge({ directory, pid: 123, terminalPath: () => undefined });
