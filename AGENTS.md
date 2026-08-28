@@ -213,11 +213,25 @@ Use `git mm` to rebase the current feature branch onto the latest `main`. This i
 
 Use it after a PR is merged and you want to continue working on the same branch with new commits on top of the updated `main`.
 
+## Proportional quality gates
+
+This policy takes precedence over generic skill instructions that require repeated or per-task reviews. Keep evidence-based verification. Do not make delivery depend on exhausting reviewer comments.
+
+Classify the requested change before implementing it:
+
+- **Micro:** docs, copy, formatting, local presentation, or a contained non-risky change. Use a focused check and inspect the diff. Do not dispatch an external reviewer by default.
+- **Standard:** a local behavior change without high-risk characteristics. Run focused tests and use at most one release-blocker review when an independent check adds value.
+- **High risk:** security, permissions, destructive data operations, persistence or migrations, concurrency, process ownership or cleanup, external integrations, production changes, or a broad refactor. Identify the specific risks before coding, run focused verification, and request one scoped risk review.
+
+A reviewer may report only `Blocker`, `Follow-up`, or `Note`. A Blocker is a defect introduced by the diff, a security or data-safety issue, or an explicit acceptance criterion that is unmet. Follow-ups and Notes do not hold delivery. Do not introduce new requirements during review; record adjacent work as a Follow-up unless it is a Blocker.
+
+Fix all Blockers in one pass, then recheck only those findings. Do not start another broad review or require a final reviewer. Deliver once the agreed acceptance criteria and relevant verification pass. Treat later user feedback as a new delta and classify that delta independently; do not reopen the completed workflow unless it changes the risk level.
+
 ## Workflow Preferences
 
-- Use **superpowers skills** when available (brainstorming, writing-plans, subagent-driven-development, branch-driven-development, test-driven-development, etc.)
+- Use **superpowers skills** when available (brainstorming, writing-plans, subagent-driven-development, branch-driven-development, test-driven-development, etc.), subject to the proportional quality-gates policy above.
 - Track multi-step work with **todo tools** — create todos at the start of complex tasks
-- Use **subagents** for delegation — scout first, then plan, then implement
+- Use **subagents** when their expected value exceeds their coordination cost. Do not require a scout, planner, or reviewer for micro work.
 - Search the web with **`websearch`** and fetch pages with **`webfetch`** — prefer these over brave-search
 - Use **`/btw`** for side conversations — ask questions or plan ahead without interrupting the main task
 - **Never make an execution promise without a live executor.** Before saying “I’ll do/check/monitor X” or implying work will continue after the response, first start a shell command, subagent, or scheduled job with an observable handle. A waiting marker or intention is not execution; a final response ends the turn.

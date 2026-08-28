@@ -1,105 +1,28 @@
 ---
 name: requesting-code-review
-description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements
+description: Use when an independent review would materially reduce the risk of a completed code change
 ---
 
-# Requesting Code Review
+# Requesting code review
 
-Dispatch superpowers:code-reviewer subagent to catch issues before they cascade.
+Use review proportionately. Tests and verification establish behavior. Review catches risks those checks do not cover. It is not a search for endless improvements.
 
-**Core principle:** Review early, review often.
+## When to request review
 
-## When to Request Review
+- **Micro work:** do not request external review by default.
+- **Standard work:** request one focused review only when the changed boundary, domain, or uncertainty makes it worthwhile.
+- **High-risk work:** request one focused review after verification, with the relevant risks named in the prompt.
 
-**Mandatory:**
-- After each task in subagent-driven development
-- After completing major feature
-- Before merge to main
+Before dispatching, provide the changed files or commit range, explicit acceptance criteria, and the narrow risk focus. Ask the reviewer for `Blocker`, `Follow-up`, and `Note` findings only.
 
-**Optional but valuable:**
-- When stuck (fresh perspective)
-- Before refactoring (baseline check)
-- After fixing complex bug
+## Triage
 
-## How to Request
-
-**1. Get git SHAs:**
-```bash
-BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
-HEAD_SHA=$(git rev-parse HEAD)
-```
-
-**2. Dispatch code-reviewer subagent:**
-
-Use Task tool with superpowers:code-reviewer type, fill template at `code-reviewer.md`
-
-**Placeholders:**
-- `{WHAT_WAS_IMPLEMENTED}` - What you just built
-- `{PLAN_OR_REQUIREMENTS}` - What it should do
-- `{BASE_SHA}` - Starting commit
-- `{HEAD_SHA}` - Ending commit
-- `{DESCRIPTION}` - Brief summary
-
-**3. Act on feedback:**
-- Fix Critical issues immediately
-- Fix Important issues before proceeding
-- Note Minor issues for later
-- Push back if reviewer is wrong (with reasoning)
+- Fix all Blockers before delivery. A Blocker is an introduced defect, a security or data-safety issue, or an unmet explicit requirement.
+- Record Follow-ups and Notes without holding delivery.
+- After fixing Blockers, request one targeted recheck of those findings only. Do not request a new broad review or a final approval review.
 
 ## Example
 
-```
-[Just completed Task 2: Add verification function]
+For a migration, ask the reviewer to check rollback, data preservation, and concurrency. If it finds an unsafe rollback, fix it and request a recheck of rollback behavior. Do not reopen style, naming, or unrelated architecture questions.
 
-You: Let me request code review before proceeding.
-
-BASE_SHA=$(git log --oneline | grep "Task 1" | head -1 | awk '{print $1}')
-HEAD_SHA=$(git rev-parse HEAD)
-
-[Dispatch superpowers:code-reviewer subagent]
-  WHAT_WAS_IMPLEMENTED: Verification and repair functions for conversation index
-  PLAN_OR_REQUIREMENTS: Task 2 from docs/plans/deployment-plan.md
-  BASE_SHA: a7981ec
-  HEAD_SHA: 3df7661
-  DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
-
-[Subagent returns]:
-  Strengths: Clean architecture, real tests
-  Issues:
-    Important: Missing progress indicators
-    Minor: Magic number (100) for reporting interval
-  Assessment: Ready to proceed
-
-You: [Fix progress indicators]
-[Continue to Task 3]
-```
-
-## Integration with Workflows
-
-**Subagent-Driven Development:**
-- Review after EACH task
-- Catch issues before they compound
-- Fix before moving to next task
-
-**Executing Plans:**
-- Review after each batch (3 tasks)
-- Get feedback, apply, continue
-
-**Ad-Hoc Development:**
-- Review before merge
-- Review when stuck
-
-## Red Flags
-
-**Never:**
-- Skip review because "it's simple"
-- Ignore Critical issues
-- Proceed with unfixed Important issues
-- Argue with valid technical feedback
-
-**If reviewer wrong:**
-- Push back with technical reasoning
-- Show code/tests that prove it works
-- Request clarification
-
-See template at: requesting-code-review/code-reviewer.md
+Do not invent requirements during review. New adjacent work is a Follow-up unless the diff introduces a release-blocking safety problem.
