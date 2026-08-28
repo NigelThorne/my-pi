@@ -8,10 +8,15 @@ const sessionManagerDirectory = join(process.env.HOME ?? "/tmp", ".pi", "agent",
 const registryDirectory = join(sessionManagerDirectory, "live");
 const launchDirectory = join(sessionManagerDirectory, "launches");
 const heartbeatIntervalMs = 15_000;
+const sessionMetadataRetryMs = 100;
 const ghosttyOsaScriptTimeoutMs = 2_000;
 
 type PresenceState = "idle" | "processing" | "stopped";
 type PresenceContext = Pick<ExtensionContext, "cwd" | "isIdle" | "sessionManager">;
+type PendingPresencePublish = {
+  ctx: PresenceContext;
+  state: PresenceState;
+};
 
 type GhosttySurfaceIdentity = {
   windowID: string;
@@ -34,6 +39,7 @@ type LiveSessionPresenceBridgeOptions = {
   writeTerminalTitleSequence?: (value: string) => boolean | void;
   resolveGhosttySurface?: (title: string) => GhosttySurfaceIdentity | undefined;
   heartbeatIntervalMs?: number;
+  sessionMetadataRetryMs?: number;
 };
 
 type ResolveGhosttySurfaceOptions = {
@@ -165,7 +171,10 @@ export class LiveSessionPresenceBridge {
   private readonly writeTerminalTitleSequence: (value: string) => boolean | void;
   private readonly resolveGhosttySurface: (title: string) => GhosttySurfaceIdentity | undefined;
   private readonly intervalMs: number;
+  private readonly metadataRetryMs: number;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
+  private publishRetry: ReturnType<typeof setTimeout> | undefined;
+  private pendingPublish: PendingPresencePublish | undefined;
   private sessionID: string | undefined;
   private tty: string | undefined;
   private currentWorkspace: string | undefined;
@@ -186,10 +195,12 @@ export class LiveSessionPresenceBridge {
     this.writeTerminalTitleSequence = options.writeTerminalTitleSequence ?? writeTerminalTitleSequence;
     this.resolveGhosttySurface = options.resolveGhosttySurface ?? resolveGhosttySurface;
     this.intervalMs = options.heartbeatIntervalMs ?? heartbeatIntervalMs;
+    this.metadataRetryMs = options.sessionMetadataRetryMs ?? sessionMetadataRetryMs;
   }
 
   start(ctx: PresenceContext): void {
     this.clearHeartbeat();
+    this.clearPublishRetry();
     this.removeCurrentRecord();
     this.tty = this.getTerminalPath();
     this.currentWorkspace = this.getWorkspace();
@@ -202,8 +213,12 @@ export class LiveSessionPresenceBridge {
   publish(ctx: PresenceContext, state: PresenceState = ctx.isIdle() ? "idle" : "processing"): void {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const sessionID = ctx.sessionManager.getSessionId();
-    if (!sessionFile || !sessionID) return;
+    if (!sessionFile || !sessionID) {
+      if (state !== "stopped") this.schedulePublishRetry(ctx, state);
+      return;
+    }
 
+    this.clearPublishRetry();
     if (this.sessionID && this.sessionID !== sessionID) {
       this.removeCurrentRecord();
     }
@@ -239,6 +254,7 @@ export class LiveSessionPresenceBridge {
 
   stop(ctx: PresenceContext): void {
     this.clearHeartbeat();
+    this.clearPublishRetry();
     this.publish(ctx, "stopped");
   }
 
@@ -247,6 +263,26 @@ export class LiveSessionPresenceBridge {
       clearInterval(this.heartbeat);
       this.heartbeat = undefined;
     }
+  }
+
+  private clearPublishRetry(): void {
+    if (this.publishRetry) {
+      clearTimeout(this.publishRetry);
+      this.publishRetry = undefined;
+    }
+    this.pendingPublish = undefined;
+  }
+
+  private schedulePublishRetry(ctx: PresenceContext, state: PresenceState): void {
+    this.pendingPublish = { ctx, state };
+    if (this.publishRetry) return;
+    this.publishRetry = setTimeout(() => {
+      this.publishRetry = undefined;
+      const pendingPublish = this.pendingPublish;
+      if (!pendingPublish) return;
+      this.publish(pendingPublish.ctx, pendingPublish.state);
+    }, this.metadataRetryMs);
+    this.publishRetry.unref?.();
   }
 
   private removeCurrentRecord(): void {

@@ -157,6 +157,55 @@ test("atomically publishes exact presence, changes state, and cleans up", () => 
   }
 });
 
+test("retries missing session metadata promptly and publishes the latest pending state before the heartbeat", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  let sessionFile;
+  let sessionID;
+  const sessionManager = {
+    getSessionFile: () => sessionFile,
+    getSessionId: () => sessionID,
+  };
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    now: () => 10_000,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    heartbeatIntervalMs: 60_000,
+    sessionMetadataRetryMs: 5,
+  });
+
+  try {
+    bridge.start({ cwd: "/projects/forms", isIdle: () => true, sessionManager });
+    bridge.publish({ cwd: "/projects/forms", isIdle: () => false, sessionManager }, "processing");
+    assert.equal(existsSync(record), false);
+
+    sessionFile = "/sessions/current.jsonl";
+    sessionID = "session-id";
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    assert.deepEqual(readRecord(record), {
+      sessionID: "session-id",
+      sessionFile: "/sessions/current.jsonl",
+      cwd: "/projects/forms",
+      pid: 123,
+      tty: "/dev/ttys001",
+      workspace: "manager-session",
+      zellijPaneID: "terminal_11",
+      terminalTitle: null,
+      ghosttyWindowID: null,
+      ghosttyTerminalID: null,
+      state: "processing",
+      updatedAt: 10_000,
+    });
+  } finally {
+    bridge.stop({ cwd: "/projects/forms", isIdle: () => false, sessionManager });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test(
   "publishes the controlling tty from inherited stdin for native Terminal sessions",
   {
