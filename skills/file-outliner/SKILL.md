@@ -45,10 +45,10 @@ src/parser.ts (112 lines)
 ### 2. `expand` — drill into blocks (show children)
 
 ```bash
-file-outliner expand <file> <block-id> [<block-id>...] [<file> <block-id>...]
+file-outliner expand <file> <block-id|range> [<block-id|range>...] [<file> <block-id|range>...]
 ```
 
-Opens the specified blocks to reveal their children. Ancestors auto-expand. You can repeat file/id groups to expand blocks across multiple files in one call.
+Opens the specified blocks to reveal their children. Ancestors auto-expand. You can repeat file/id groups to expand blocks across multiple files in one call. Inclusive ranges work too: `b1-23` is equivalent to `b1 b2 ... b23`. Ranges can appear alongside individual IDs and in repeated multi-file groups. One range may contain at most 10,000 block IDs.
 
 Example:
 ```
@@ -58,13 +58,19 @@ Example:
   · [b7] render(...)  (L47-92, 46 lines)
 ```
 
+Range examples:
+```bash
+file-outliner expand file.ts b3 b7-12
+file-outliner expand file1.ts b3 b8-10 file2.ts b4 b9-12
+```
+
 ### 3. `show` — read the actual source code of a block
 
 ```bash
-file-outliner show <file> <block-id> [<block-id>...] [<file> <block-id>...]
+file-outliner show <file> <block-id|range> [<block-id|range>...] [<file> <block-id|range>...]
 ```
 
-Displays full source with line numbers for the specified blocks. You can repeat file/id groups to show blocks across multiple files in one call.
+Displays full source with line numbers for the specified blocks. You can repeat file/id groups to show blocks across multiple files in one call. Inclusive ranges work too: `b1-23` is equivalent to `b1 b2 ... b23`. Ranges can appear alongside individual IDs and in repeated multi-file groups. One range may contain at most 10,000 block IDs.
 
 Example:
 ```
@@ -75,6 +81,11 @@ Example:
     14│     this.cache = new Map();
     15│   }
   ────────────────────────────────────────────────────────────
+```
+
+Range example:
+```bash
+file-outliner show <file> b1-23 b99-102
 ```
 
 ### 4. `lines` — read raw line range
@@ -114,10 +125,10 @@ This is much more token-efficient than reading an entire file when you only need
 
 - Block IDs are stable for a given file and always look like `b1`, `b2`, `b10` — you can reference them across multiple commands
 - Outline multiple files at once: `outline file1.ts file2.ts file3.js`
-- Expand multiple blocks at once: `expand file.ts b3 b7 b12`
-- Expand blocks across files: `expand file1.ts b3 file2.ts b4 b8`
-- Show multiple blocks at once: `show file.ts b3 b7` to compare functions side-by-side
-- Show blocks across files: `show file1.ts b3 file2.ts b4 b8`
+- Expand multiple blocks or ranges at once: `expand file.ts b3 b7 b12-15`
+- Expand blocks across files: `expand file1.ts b3 b8-10 file2.ts b4 b8`
+- Show multiple blocks or ranges at once: `show file.ts b3 b7 b12-15` to compare functions side-by-side
+- Show blocks across files: `show file1.ts b3 b8-10 file2.ts b4 b8`
 - The `▶` marker means a block has children worth expanding
 - The `·` marker means it's a leaf block — use `show` to read its content
 - Multi-file `outline` prints a filename header before each file and reports per-file errors clearly
