@@ -62,6 +62,7 @@ type LiveSessionPresenceBridgeOptions = {
   writeTerminalTitleSequence?: (value: string) => boolean | void;
   resolveGhosttySurface?: (title: string) => GhosttySurfaceIdentity | undefined;
   resolveCurrentGhosttySurface?: (identity: CurrentGhosttySurfaceIdentity) => GhosttySurfaceIdentity | undefined;
+  resolveFocusedGhosttySurface?: () => GhosttySurfaceIdentity | undefined;
   sendAdvisoryPoke?: (stream: AdvisoryPokeStream) => void;
   heartbeatIntervalMs?: number;
   sessionMetadataRetryMs?: number;
@@ -161,6 +162,32 @@ export function resolveCurrentGhosttySurface(identity: CurrentGhosttySurfaceIden
   return undefined;
 }
 
+export function resolveFocusedGhosttySurface(options: Pick<ResolveGhosttySurfaceOptions, "isGhosttyRunning"> = {}): GhosttySurfaceIdentity | undefined {
+  const isRunning = options.isGhosttyRunning ?? ghosttyIsRunning;
+  if (!isRunning()) return undefined;
+  try {
+    const output = execFileSync(
+      "/usr/bin/osascript",
+      [
+        "-e",
+        `tell application "Ghostty"
+  set frontTerminal to focused terminal of selected tab of front window
+  return (id of front window as text) & (ASCII character 9) & (id of frontTerminal as text) & (ASCII character 9) & "focused"
+end tell`,
+      ],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: ghosttyOsaScriptTimeoutMs,
+      }
+    );
+    const surface = parseGhosttySurfaces(output)[0];
+    return surface ? { windowID: surface.windowID, terminalID: surface.terminalID } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function listGhosttySurfaces(): GhosttySurface[] {
   try {
     const output = execFileSync(
@@ -222,6 +249,7 @@ export class LiveSessionPresenceBridge {
   private readonly writeTerminalTitleSequence: (value: string) => boolean | void;
   private readonly resolveGhosttySurface: (title: string) => GhosttySurfaceIdentity | undefined;
   private readonly resolveCurrentGhosttySurface: (identity: CurrentGhosttySurfaceIdentity) => GhosttySurfaceIdentity | undefined;
+  private readonly resolveFocusedGhosttySurface: () => GhosttySurfaceIdentity | undefined;
   private readonly intervalMs: number;
   private readonly metadataRetryMs: number;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -249,6 +277,7 @@ export class LiveSessionPresenceBridge {
     this.writeTerminalTitleSequence = options.writeTerminalTitleSequence ?? writeTerminalTitleSequence;
     this.resolveGhosttySurface = options.resolveGhosttySurface ?? resolveGhosttySurface;
     this.resolveCurrentGhosttySurface = options.resolveCurrentGhosttySurface ?? ((identity) => resolveCurrentGhosttySurface(identity));
+    this.resolveFocusedGhosttySurface = options.resolveFocusedGhosttySurface ?? (() => resolveFocusedGhosttySurface());
     this.intervalMs = options.heartbeatIntervalMs ?? heartbeatIntervalMs;
     this.metadataRetryMs = options.sessionMetadataRetryMs ?? sessionMetadataRetryMs;
   }
@@ -340,6 +369,7 @@ export class LiveSessionPresenceBridge {
         terminalID: currentGhosttySurfaceID(),
         tty: this.tty,
       }) ??
+      this.resolveFocusedGhosttySurface() ??
       (this.currentWorkspace ? this.resolveGhosttySurface(terminalTitle(this.currentWorkspace)) : undefined);
     if (surface?.windowID && surface.terminalID) {
       this.currentGhosttyWindowID = surface.windowID;

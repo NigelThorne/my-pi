@@ -855,6 +855,7 @@ test("registerWindow falls back to the unique Zellij workspace title", () => {
     zellijPaneID: () => "terminal_11",
     isInteractive: () => true,
     resolveCurrentGhosttySurface: () => undefined,
+    resolveFocusedGhosttySurface: () => undefined,
     resolveGhosttySurface: (title) => {
       assert.equal(title, "Pi Session manager-session");
       return { windowID: "window-z", terminalID: "terminal-live" };
@@ -870,6 +871,36 @@ test("registerWindow falls back to the unique Zellij workspace title", () => {
     });
     assert.equal(readRecord(record).ghosttyWindowID, "window-z");
     assert.equal(readRecord(record).ghosttyTerminalID, "terminal-live");
+  } finally {
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("registerWindow falls back to the focused Ghostty terminal when env and title lookup fail", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    isInteractive: () => true,
+    resolveCurrentGhosttySurface: () => undefined,
+    resolveFocusedGhosttySurface: () => ({ windowID: "window-front", terminalID: "terminal-front" }),
+    resolveGhosttySurface: () => undefined,
+  });
+
+  try {
+    bridge.start(context());
+
+    assert.deepEqual(bridge.registerWindow(context({ idle: false })), {
+      ok: true,
+      message: "Registered the current Ghostty window for this session.",
+    });
+    assert.equal(readRecord(record).ghosttyWindowID, "window-front");
+    assert.equal(readRecord(record).ghosttyTerminalID, "terminal-front");
   } finally {
     bridge.stop(context());
     rmSync(directory, { recursive: true, force: true });
@@ -892,6 +923,7 @@ test("registerWindow fails safely when Ghostty identity cannot be determined", (
     zellijPaneID: () => "terminal_11",
     isInteractive: () => true,
     resolveCurrentGhosttySurface: () => nextSurface,
+    resolveFocusedGhosttySurface: () => undefined,
   });
 
   try {
