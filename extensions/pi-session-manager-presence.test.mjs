@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { LiveSessionPresenceBridge, matchUniqueGhosttySurface, parseGhosttySurfaces, resolveGhosttySurface } from "./pi-session-manager-presence.ts";
+import registerPresenceExtension, { LiveSessionPresenceBridge, matchUniqueGhosttySurface, parseGhosttySurfaces, resolveGhosttySurface } from "./pi-session-manager-presence.ts";
 
 function context({ sessionID = "session-id", sessionFile = "/sessions/current.jsonl", idle = true } = {}) {
   return {
@@ -50,6 +50,21 @@ function withPatchedConsoleError(callback) {
 
 function readRecord(path) {
   return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function makePi() {
+  const commands = new Map();
+  const handlers = new Map();
+  return {
+    commands,
+    handlers,
+    registerCommand(name, definition) {
+      commands.set(name, definition);
+    },
+    on(name, handler) {
+      handlers.set(name, handler);
+    },
+  };
 }
 
 test("matchUniqueGhosttySurface returns an exact title match", () => {
@@ -736,6 +751,270 @@ test("does not overwrite Zellij pane-managed terminal titles", () => {
   } finally {
     bridge.stop(context());
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("registers the /register-window command", () => {
+  const pi = makePi();
+
+  registerPresenceExtension(pi);
+
+  assert.equal(typeof pi.commands.get("register-window")?.handler, "function");
+});
+
+test("registerWindow republishes the current Ghostty surface for Zellij sessions", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const timestamps = [10_000, 10_001, 10_002];
+  const previousSurfaceID = process.env.GHOSTTY_SURFACE_ID;
+  let resolvedIdentity;
+  process.env.GHOSTTY_SURFACE_ID = "terminal-live";
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    now: () => timestamps.shift() ?? 10_999,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    isInteractive: () => true,
+    resolveCurrentGhosttySurface: (identity) => {
+      resolvedIdentity = identity;
+      return { windowID: "window-z", terminalID: "terminal-live" };
+    },
+  });
+
+  try {
+    bridge.start(context());
+    assert.equal(readRecord(record).ghosttyWindowID, null);
+    assert.equal(readRecord(record).ghosttyTerminalID, null);
+
+    assert.deepEqual(bridge.registerWindow(context({ idle: false })), {
+      ok: true,
+      message: "Registered the current Ghostty window for this session.",
+    });
+    assert.deepEqual(resolvedIdentity, {
+      terminalID: "terminal-live",
+      tty: "/dev/ttys001",
+    });
+    assert.deepEqual(readRecord(record), {
+      sessionID: "session-id",
+      sessionFile: "/sessions/current.jsonl",
+      cwd: "/projects/forms",
+      pid: 123,
+      tty: "/dev/ttys001",
+      workspace: "manager-session",
+      zellijPaneID: "terminal_11",
+      terminalTitle: null,
+      ghosttyWindowID: "window-z",
+      ghosttyTerminalID: "terminal-live",
+      state: "processing",
+      updatedAt: 10_001,
+    });
+  } finally {
+    if (previousSurfaceID === undefined) delete process.env.GHOSTTY_SURFACE_ID;
+    else process.env.GHOSTTY_SURFACE_ID = previousSurfaceID;
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("preserves registered Ghostty IDs on a Zellij heartbeat", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    isInteractive: () => true,
+    resolveCurrentGhosttySurface: () => ({ windowID: "window-z", terminalID: "terminal-live" }),
+  });
+
+  try {
+    bridge.start(context());
+    bridge.registerWindow(context());
+    bridge.publish(context());
+
+    assert.equal(readRecord(record).ghosttyWindowID, "window-z");
+    assert.equal(readRecord(record).ghosttyTerminalID, "terminal-live");
+  } finally {
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("registerWindow falls back to the unique Zellij workspace title", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    isInteractive: () => true,
+    resolveCurrentGhosttySurface: () => undefined,
+    resolveGhosttySurface: (title) => {
+      assert.equal(title, "Pi Session manager-session");
+      return { windowID: "window-z", terminalID: "terminal-live" };
+    },
+  });
+
+  try {
+    bridge.start(context());
+
+    assert.deepEqual(bridge.registerWindow(context({ idle: false })), {
+      ok: true,
+      message: "Registered the current Ghostty window for this session.",
+    });
+    assert.equal(readRecord(record).ghosttyWindowID, "window-z");
+    assert.equal(readRecord(record).ghosttyTerminalID, "terminal-live");
+  } finally {
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("registerWindow fails safely when Ghostty identity cannot be determined", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const timestamps = [10_000, 10_001, 10_002, 10_003];
+  const previousSurfaceID = process.env.GHOSTTY_SURFACE_ID;
+  let nextSurface = { windowID: "window-z", terminalID: "terminal-live" };
+  process.env.GHOSTTY_SURFACE_ID = "terminal-live";
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    now: () => timestamps.shift() ?? 10_999,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    isInteractive: () => true,
+    resolveCurrentGhosttySurface: () => nextSurface,
+  });
+
+  try {
+    bridge.start(context());
+    bridge.registerWindow(context());
+    nextSurface = undefined;
+
+    assert.deepEqual(bridge.registerWindow(context({ idle: false })), {
+      ok: false,
+      message: "Could not determine the current Ghostty window for this session. Run /register-window from the active Ghostty pane and try again.",
+    });
+    assert.deepEqual(readRecord(record), {
+      sessionID: "session-id",
+      sessionFile: "/sessions/current.jsonl",
+      cwd: "/projects/forms",
+      pid: 123,
+      tty: "/dev/ttys001",
+      workspace: "manager-session",
+      zellijPaneID: "terminal_11",
+      terminalTitle: null,
+      ghosttyWindowID: "window-z",
+      ghosttyTerminalID: "terminal-live",
+      state: "processing",
+      updatedAt: 10_002,
+    });
+  } finally {
+    if (previousSurfaceID === undefined) delete process.env.GHOSTTY_SURFACE_ID;
+    else process.env.GHOSTTY_SURFACE_ID = previousSurfaceID;
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("publishes an advisory presence poke only after the authoritative file lands", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const pokes = [];
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    now: () => 10_000,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    sendAdvisoryPoke: (stream) => {
+      pokes.push({ stream, exists: existsSync(record), state: readRecord(record).state });
+    },
+  });
+
+  try {
+    bridge.publish(context(), "idle");
+    assert.deepEqual(pokes, [{ stream: "presence", exists: true, state: "idle" }]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("ignores advisory socket failures and keeps the authoritative presence file", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  let attempts = 0;
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    now: () => 10_000,
+    terminalPath: () => "/dev/ttys001",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    sendAdvisoryPoke: () => {
+      attempts += 1;
+      throw new Error("connect failed");
+    },
+  });
+
+  try {
+    assert.doesNotThrow(() => bridge.publish(context({ idle: false }), "processing"));
+    assert.equal(attempts, 1);
+    assert.deepEqual(readRecord(record), {
+      sessionID: "session-id",
+      sessionFile: "/sessions/current.jsonl",
+      cwd: "/projects/forms",
+      pid: 123,
+      tty: null,
+      workspace: null,
+      zellijPaneID: null,
+      terminalTitle: null,
+      ghosttyWindowID: null,
+      ghosttyTerminalID: null,
+      state: "processing",
+      updatedAt: 10_000,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("publishes a subagent launch advisory poke only after the authoritative file lands", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const launchDirectory = mkdtempSync(join(tmpdir(), "pi-session-manager-launch-"));
+  const record = join(launchDirectory, "session-id-child.jsonl.json");
+  const pokes = [];
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    launchDirectory,
+    pid: 123,
+    now: () => 10_000,
+    sendAdvisoryPoke: (stream) => {
+      pokes.push({ stream, exists: existsSync(record), childSessionFile: JSON.parse(readFileSync(record, "utf8")).childSessionFile });
+    },
+  });
+
+  try {
+    bridge.publishSubagentLaunch(context(), { details: { sessionFile: "/sessions/child.jsonl" } });
+    assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), {
+      parentSessionID: "session-id",
+      parentSessionFile: "/sessions/current.jsonl",
+      childSessionFile: "/sessions/child.jsonl",
+      updatedAt: 10_000,
+    });
+    assert.deepEqual(pokes, [{ stream: "launch", exists: true, childSessionFile: "/sessions/child.jsonl" }]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(launchDirectory, { recursive: true, force: true });
   }
 });
 

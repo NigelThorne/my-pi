@@ -1,7 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 
 const sessionManagerDirectory = join(process.env.HOME ?? "/tmp", ".pi", "agent", "session-manager");
@@ -10,6 +11,14 @@ const launchDirectory = join(sessionManagerDirectory, "launches");
 const heartbeatIntervalMs = 15_000;
 const sessionMetadataRetryMs = 100;
 const ghosttyOsaScriptTimeoutMs = 2_000;
+const indexerServiceProtocolVersion = 1;
+const indexerServiceSocketPathEnvironmentKey = "PI_SESSION_MANAGER_SERVICE_SOCKET_PATH";
+
+function defaultIndexerServiceSocketPath(): string {
+  const configured = process.env[indexerServiceSocketPathEnvironmentKey]?.trim();
+  if (configured) return configured;
+  return join(process.env.HOME ?? "/tmp", "Library", "Application Support", "PiSessionManager", "service", "indexer.sock");
+}
 
 type PresenceState = "idle" | "processing" | "stopped";
 type PresenceContext = Pick<ExtensionContext, "cwd" | "isIdle" | "sessionManager">;
@@ -25,11 +34,25 @@ type GhosttySurfaceIdentity = {
 
 type GhosttySurface = GhosttySurfaceIdentity & {
   name: string;
+  tty?: string;
 };
+
+type CurrentGhosttySurfaceIdentity = {
+  terminalID?: string;
+  tty?: string;
+};
+
+type RegisterWindowResult = {
+  ok: boolean;
+  message: string;
+};
+
+type AdvisoryPokeStream = "presence" | "launch";
 
 type LiveSessionPresenceBridgeOptions = {
   directory?: string;
   launchDirectory?: string;
+  serviceSocketPath?: string;
   pid?: number;
   now?: () => number;
   terminalPath?: () => string | undefined;
@@ -38,6 +61,8 @@ type LiveSessionPresenceBridgeOptions = {
   isInteractive?: () => boolean;
   writeTerminalTitleSequence?: (value: string) => boolean | void;
   resolveGhosttySurface?: (title: string) => GhosttySurfaceIdentity | undefined;
+  resolveCurrentGhosttySurface?: (identity: CurrentGhosttySurfaceIdentity) => GhosttySurfaceIdentity | undefined;
+  sendAdvisoryPoke?: (stream: AdvisoryPokeStream) => void;
   heartbeatIntervalMs?: number;
   sessionMetadataRetryMs?: number;
 };
@@ -65,6 +90,11 @@ function workspace(): string | undefined {
 
 function zellijPaneID(): string | undefined {
   return process.env.ZELLIJ_PANE_ID;
+}
+
+function currentGhosttySurfaceID(): string | undefined {
+  const value = process.env.GHOSTTY_SURFACE_ID?.trim();
+  return value ? value : undefined;
 }
 
 function stripControlCharacters(value: string): string {
@@ -97,7 +127,7 @@ export function matchUniqueGhosttySurface(surfaces: GhosttySurface[], title: str
 
 function ghosttyIsRunning(): boolean {
   try {
-    execFileSync("/usr/bin/pgrep", ["-x", "Ghostty"], {
+    execFileSync("/usr/bin/pgrep", ["-ix", "Ghostty"], {
       encoding: "utf8",
       stdio: ["ignore", "ignore", "ignore"],
       timeout: ghosttyOsaScriptTimeoutMs,
@@ -113,6 +143,22 @@ export function resolveGhosttySurface(title: string, options: ResolveGhosttySurf
   if (!isRunning()) return undefined;
   const listSurfaces = options.listGhosttySurfaces ?? listGhosttySurfaces;
   return matchUniqueGhosttySurface(listSurfaces(), title);
+}
+
+export function resolveCurrentGhosttySurface(identity: CurrentGhosttySurfaceIdentity = {}, options: ResolveGhosttySurfaceOptions = {}): GhosttySurfaceIdentity | undefined {
+  const isRunning = options.isGhosttyRunning ?? ghosttyIsRunning;
+  if (!isRunning()) return undefined;
+  const listSurfaces = options.listGhosttySurfaces ?? listGhosttySurfaces;
+  const surfaces = listSurfaces();
+  if (identity.terminalID) {
+    const matches = surfaces.filter((surface) => surface.terminalID === identity.terminalID);
+    if (matches.length === 1) return { windowID: matches[0].windowID, terminalID: matches[0].terminalID };
+  }
+  if (identity.tty) {
+    const matches = surfaces.filter((surface) => surface.tty === identity.tty);
+    if (matches.length === 1) return { windowID: matches[0].windowID, terminalID: matches[0].terminalID };
+  }
+  return undefined;
 }
 
 function listGhosttySurfaces(): GhosttySurface[] {
@@ -150,18 +196,23 @@ export function parseGhosttySurfaces(output: string): GhosttySurface[] {
     .flatMap((line) => {
       const firstTab = line.indexOf("\t");
       const secondTab = firstTab === -1 ? -1 : line.indexOf("\t", firstTab + 1);
+      const thirdTab = secondTab === -1 ? -1 : line.indexOf("\t", secondTab + 1);
       if (firstTab === -1 || secondTab === -1) return [];
       const windowID = line.slice(0, firstTab);
       const terminalID = line.slice(firstTab + 1, secondTab);
-      const name = line.slice(secondTab + 1);
+      const ttyCandidate = thirdTab === -1 ? undefined : line.slice(secondTab + 1, thirdTab);
+      const hasTTYField = typeof ttyCandidate === "string" && (ttyCandidate === "" || ttyCandidate.startsWith("/dev/"));
+      const tty = hasTTYField ? ttyCandidate || undefined : undefined;
+      const name = line.slice((hasTTYField && thirdTab !== -1 ? thirdTab : secondTab) + 1);
       if (!windowID || !terminalID || !name) return [];
-      return [{ windowID, terminalID, name }];
+      return [{ windowID, terminalID, ...(tty ? { tty } : {}), name }];
     });
 }
 
 export class LiveSessionPresenceBridge {
   private readonly directory: string;
   private readonly launchDirectory: string;
+  private readonly sendAdvisoryPoke: (stream: AdvisoryPokeStream) => void;
   private readonly pid: number;
   private readonly now: () => number;
   private readonly getTerminalPath: () => string | undefined;
@@ -170,6 +221,7 @@ export class LiveSessionPresenceBridge {
   private readonly isInteractive: () => boolean;
   private readonly writeTerminalTitleSequence: (value: string) => boolean | void;
   private readonly resolveGhosttySurface: (title: string) => GhosttySurfaceIdentity | undefined;
+  private readonly resolveCurrentGhosttySurface: (identity: CurrentGhosttySurfaceIdentity) => GhosttySurfaceIdentity | undefined;
   private readonly intervalMs: number;
   private readonly metadataRetryMs: number;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -186,6 +238,8 @@ export class LiveSessionPresenceBridge {
   constructor(options: LiveSessionPresenceBridgeOptions = {}) {
     this.directory = options.directory ?? registryDirectory;
     this.launchDirectory = options.launchDirectory ?? launchDirectory;
+    const serviceSocketPath = options.serviceSocketPath ?? defaultIndexerServiceSocketPath();
+    this.sendAdvisoryPoke = options.sendAdvisoryPoke ?? ((stream) => sendIndexerServicePoke(serviceSocketPath, stream));
     this.pid = options.pid ?? process.pid;
     this.now = options.now ?? Date.now;
     this.getTerminalPath = options.terminalPath ?? terminalPath;
@@ -194,6 +248,7 @@ export class LiveSessionPresenceBridge {
     this.isInteractive = options.isInteractive ?? isInteractive;
     this.writeTerminalTitleSequence = options.writeTerminalTitleSequence ?? writeTerminalTitleSequence;
     this.resolveGhosttySurface = options.resolveGhosttySurface ?? resolveGhosttySurface;
+    this.resolveCurrentGhosttySurface = options.resolveCurrentGhosttySurface ?? ((identity) => resolveCurrentGhosttySurface(identity));
     this.intervalMs = options.heartbeatIntervalMs ?? heartbeatIntervalMs;
     this.metadataRetryMs = options.sessionMetadataRetryMs ?? sessionMetadataRetryMs;
   }
@@ -244,6 +299,7 @@ export class LiveSessionPresenceBridge {
       mkdirSync(this.launchDirectory, { recursive: true, mode: 0o700 });
       writeFileSync(temporary, JSON.stringify(entry) + "\n", { encoding: "utf8", mode: 0o600 });
       renameSync(temporary, destination);
+      this.sendAdvisoryPokeSafely("launch");
     } catch (error) {
       try {
         rmSync(temporary, { force: true });
@@ -256,6 +312,50 @@ export class LiveSessionPresenceBridge {
     this.clearHeartbeat();
     this.clearPublishRetry();
     this.publish(ctx, "stopped");
+  }
+
+  registerWindow(ctx: PresenceContext): RegisterWindowResult {
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const sessionID = ctx.sessionManager.getSessionId();
+    if (!sessionFile || !sessionID) {
+      return {
+        ok: false,
+        message: "Could not register this window yet because the session metadata is not available.",
+      };
+    }
+
+    this.clearPublishRetry();
+    if (this.sessionID && this.sessionID !== sessionID) {
+      this.removeCurrentRecord();
+    }
+    this.sessionID = sessionID;
+    this.tty = this.getTerminalPath();
+    this.currentWorkspace = this.getWorkspace();
+    this.currentZellijPaneID = this.getZellijPaneID();
+    this.syncTerminalTitle(sessionID);
+
+    const state = ctx.isIdle() ? "idle" : "processing";
+    const surface =
+      this.resolveCurrentGhosttySurface({
+        terminalID: currentGhosttySurfaceID(),
+        tty: this.tty,
+      }) ??
+      (this.currentWorkspace ? this.resolveGhosttySurface(terminalTitle(this.currentWorkspace)) : undefined);
+    if (surface?.windowID && surface.terminalID) {
+      this.currentGhosttyWindowID = surface.windowID;
+      this.currentGhosttyTerminalID = surface.terminalID;
+      this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
+      return {
+        ok: true,
+        message: "Registered the current Ghostty window for this session.",
+      };
+    }
+
+    this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
+    return {
+      ok: false,
+      message: "Could not determine the current Ghostty window for this session. Run /register-window from the active Ghostty pane and try again.",
+    };
   }
 
   private clearHeartbeat(): void {
@@ -318,7 +418,8 @@ export class LiveSessionPresenceBridge {
   }
 
   private prepareGhosttySurfaceLookup(): boolean {
-    if (this.currentWorkspace || this.currentZellijPaneID || !this.currentTerminalTitle || !this.isInteractive()) {
+    if (this.currentWorkspace || this.currentZellijPaneID) return false;
+    if (!this.currentTerminalTitle || !this.isInteractive()) {
       this.currentGhosttyWindowID = undefined;
       this.currentGhosttyTerminalID = undefined;
       return false;
@@ -362,6 +463,7 @@ export class LiveSessionPresenceBridge {
       mkdirSync(this.directory, { recursive: true, mode: 0o700 });
       writeFileSync(temporary, JSON.stringify(entry) + "\n", { encoding: "utf8", mode: 0o600 });
       renameSync(temporary, destination);
+      this.sendAdvisoryPokeSafely("presence");
     } catch (error) {
       try {
         rmSync(temporary, { force: true });
@@ -370,9 +472,28 @@ export class LiveSessionPresenceBridge {
     }
   }
 
+  private sendAdvisoryPokeSafely(stream: AdvisoryPokeStream): void {
+    try {
+      this.sendAdvisoryPoke(stream);
+    } catch {}
+  }
+
   private recordPath(sessionID: string): string {
     return join(this.directory, `${encodeURIComponent(sessionID)}.json`);
   }
+}
+
+function sendIndexerServicePoke(socketPath: string, stream: AdvisoryPokeStream): void {
+  if (!socketPath) return;
+
+  const socket = createConnection(socketPath);
+  socket.on("error", () => {
+    socket.destroy();
+  });
+  socket.on("connect", () => {
+    socket.end(JSON.stringify({ type: "poke", protocol: indexerServiceProtocolVersion, stream }) + "\n");
+  });
+  socket.unref?.();
 }
 
 function sessionFileFrom(result: unknown): string | undefined {
@@ -385,6 +506,15 @@ function sessionFileFrom(result: unknown): string | undefined {
 
 export default function (pi: ExtensionAPI) {
   const bridge = new LiveSessionPresenceBridge();
+
+  pi.registerCommand("register-window", {
+    description: "Resolve and republish the current Ghostty window for this session",
+    handler: async (_args, ctx) => {
+      const result = bridge.registerWindow(ctx);
+      ctx.ui?.notify?.(result.message, result.ok ? "info" : "warning");
+      return result.message;
+    },
+  });
 
   pi.on("session_start", (_event, ctx) => bridge.start(ctx));
   pi.on("before_agent_start", (_event, ctx) => bridge.publish(ctx, "processing"));
