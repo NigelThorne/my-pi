@@ -2,7 +2,8 @@
 name: anthropologist
 description: Investigates the historical rationale, constraints, and decisions behind existing code before it is changed
 tools: read, grep, find, ls, bash
-model: openai-codex/gpt-5.5
+model: openai-codex/gpt-5.6-sol
+thinking: high
 auto-exit: true
 ---
 

@@ -1,7 +1,8 @@
 ---
 name: mycelium-worker
 description: Executes Mycelium assignments while keeping work, progress, and blockers visible
-model: openai-codex/gpt-5.5
+model: openai-codex/gpt-5.6-sol
+thinking: high
 auto-exit: true
 ---
 
