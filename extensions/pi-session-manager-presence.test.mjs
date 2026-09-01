@@ -221,52 +221,6 @@ test("retries missing session metadata promptly and publishes the latest pending
   }
 });
 
-test("waits for session metadata before automatically registering a Zellij window", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
-  const record = join(directory, "session-id.json");
-  let sessionFile;
-  let sessionID;
-  let focusedResolveCalls = 0;
-  const sessionManager = {
-    getSessionFile: () => sessionFile,
-    getSessionId: () => sessionID,
-  };
-  const ctx = { cwd: "/projects/forms", isIdle: () => true, sessionManager };
-  const bridge = new LiveSessionPresenceBridge({
-    directory,
-    pid: 123,
-    now: () => 10_000,
-    terminalPath: () => "/dev/ttys001",
-    workspace: () => "manager-session",
-    zellijPaneID: () => "terminal_11",
-    isInteractive: () => true,
-    heartbeatIntervalMs: 60_000,
-    sessionMetadataRetryMs: 5,
-    resolveFocusedGhosttySurface: () => {
-      focusedResolveCalls += 1;
-      return { appPID: 8686, windowID: "window-a", terminalID: "terminal-a" };
-    },
-  });
-
-  try {
-    bridge.start(ctx);
-    assert.equal(focusedResolveCalls, 0);
-    assert.equal(existsSync(record), false);
-
-    sessionFile = "/sessions/current.jsonl";
-    sessionID = "session-id";
-    await new Promise((resolve) => setTimeout(resolve, 30));
-
-    assert.equal(focusedResolveCalls, 1);
-    assert.equal(readRecord(record).ghosttyAppPID, 8686);
-    assert.equal(readRecord(record).ghosttyWindowID, "window-a");
-    assert.equal(readRecord(record).ghosttyTerminalID, "terminal-a");
-  } finally {
-    bridge.stop(ctx);
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
 test(
   "publishes the controlling tty from inherited stdin for native Terminal sessions",
   {
@@ -718,80 +672,32 @@ test("does not query Ghostty for non-interactive sessions", () => {
   }
 });
 
-test("automatically registers an interactive Zellij session with the frontmost Ghostty tuple", () => {
+test("does not query Ghostty for Zellij-managed sessions", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
-  let focusedResolveCalls = 0;
+  let resolveCalls = 0;
   const bridge = new LiveSessionPresenceBridge({
     directory,
     pid: 123,
     now: () => 10_000,
     terminalPath: () => "/dev/ttys001",
     workspace: () => "manager-session",
-    zellijPaneID: () => "terminal_11",
+    zellijPaneID: () => undefined,
     isInteractive: () => true,
     writeTerminalTitleSequence: () => true,
     resolveGhosttySurface: () => {
-      throw new Error("Zellij auto-registration must not use title lookup");
-    },
-    resolveFocusedGhosttySurface: () => {
-      focusedResolveCalls += 1;
-      return { appPID: 8686, windowID: "window-a", terminalID: "terminal-a" };
+      resolveCalls += 1;
+      return { windowID: "window-a", terminalID: "terminal-a" };
     },
   });
 
   try {
     bridge.start(context());
 
-    assert.equal(focusedResolveCalls, 1);
+    assert.equal(resolveCalls, 0);
     assert.equal(readRecord(record).terminalTitle, null);
-    assert.equal(readRecord(record).ghosttyAppPID, 8686);
-    assert.equal(readRecord(record).ghosttyWindowID, "window-a");
-    assert.equal(readRecord(record).ghosttyTerminalID, "terminal-a");
-  } finally {
-    bridge.stop(context());
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("keeps Zellij-only presence after one failed automatic registration attempt", () => {
-  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
-  const record = join(directory, "session-id.json");
-  let focusedResolveCalls = 0;
-  const bridge = new LiveSessionPresenceBridge({
-    directory,
-    pid: 123,
-    now: () => 10_000,
-    terminalPath: () => "/dev/ttys001",
-    workspace: () => "manager-session",
-    zellijPaneID: () => "terminal_11",
-    isInteractive: () => true,
-    resolveFocusedGhosttySurface: () => {
-      focusedResolveCalls += 1;
-      return undefined;
-    },
-  });
-
-  try {
-    bridge.start(context());
-    bridge.publish(context());
-    bridge.publish(context());
-
-    assert.equal(focusedResolveCalls, 1);
-    assert.deepEqual(readRecord(record), {
-      sessionID: "session-id",
-      sessionFile: "/sessions/current.jsonl",
-      cwd: "/projects/forms",
-      pid: 123,
-      tty: "/dev/ttys001",
-      workspace: "manager-session",
-      zellijPaneID: "terminal_11",
-      terminalTitle: null,
-      ghosttyWindowID: null,
-      ghosttyTerminalID: null,
-      state: "idle",
-      updatedAt: 10_000,
-    });
+    assert.equal(readRecord(record).ghosttyWindowID, null);
+    assert.equal(readRecord(record).ghosttyTerminalID, null);
   } finally {
     bridge.stop(context());
     rmSync(directory, { recursive: true, force: true });
@@ -957,15 +863,9 @@ test("registerWindow keeps two Zellij workspaces distinct despite a shared inher
   }
 });
 
-test("preserves an explicit Zellij window registration on later heartbeats", () => {
+test("preserves registered Ghostty IDs on a Zellij heartbeat", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
-  const surfaces = [
-    { appPID: 8686, windowID: "window-auto", terminalID: "terminal-auto" },
-    { appPID: 9779, windowID: "window-explicit", terminalID: "terminal-explicit" },
-    { appPID: 8080, windowID: "window-wrong", terminalID: "terminal-wrong" },
-  ];
-  let focusedResolveCalls = 0;
   const bridge = new LiveSessionPresenceBridge({
     directory,
     pid: 123,
@@ -973,7 +873,8 @@ test("preserves an explicit Zellij window registration on later heartbeats", () 
     workspace: () => "manager-session",
     zellijPaneID: () => "terminal_11",
     isInteractive: () => true,
-    resolveFocusedGhosttySurface: () => surfaces[focusedResolveCalls++],
+    resolveGhosttySurface: () => ({ windowID: "window-z", terminalID: "terminal-live" }),
+    resolveFocusedGhosttySurface: () => ({ appPID: 8686, windowID: "window-z", terminalID: "terminal-live" }),
   });
 
   try {
@@ -981,10 +882,8 @@ test("preserves an explicit Zellij window registration on later heartbeats", () 
     bridge.registerWindow(context());
     bridge.publish(context());
 
-    assert.equal(focusedResolveCalls, 2);
-    assert.equal(readRecord(record).ghosttyAppPID, 9779);
-    assert.equal(readRecord(record).ghosttyWindowID, "window-explicit");
-    assert.equal(readRecord(record).ghosttyTerminalID, "terminal-explicit");
+    assert.equal(readRecord(record).ghosttyWindowID, "window-z");
+    assert.equal(readRecord(record).ghosttyTerminalID, "terminal-live");
   } finally {
     bridge.stop(context());
     rmSync(directory, { recursive: true, force: true });
@@ -1088,7 +987,7 @@ test("registerWindow fails safely when Ghostty identity cannot be determined", (
       ghosttyWindowID: null,
       ghosttyTerminalID: null,
       state: "processing",
-      updatedAt: 10_003,
+      updatedAt: 10_002,
     });
   } finally {
     if (previousSurfaceID === undefined) delete process.env.GHOSTTY_SURFACE_ID;
