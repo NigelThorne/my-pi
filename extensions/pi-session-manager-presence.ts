@@ -364,13 +364,14 @@ export class LiveSessionPresenceBridge {
     this.syncTerminalTitle(sessionID);
 
     const state = ctx.isIdle() ? "idle" : "processing";
-    const surface =
-      this.resolveCurrentGhosttySurface({
-        terminalID: currentGhosttySurfaceID(),
-        tty: this.tty,
-      }) ??
-      this.resolveFocusedGhosttySurface() ??
-      (this.currentWorkspace ? this.resolveGhosttySurface(terminalTitle(this.currentWorkspace)) : undefined);
+    const isZellijSession = Boolean(this.currentWorkspace || this.currentZellijPaneID);
+    const surface = isZellijSession
+      ? (this.currentWorkspace ? this.resolveGhosttySurface(terminalTitle(this.currentWorkspace)) : undefined) ??
+        this.resolveFocusedGhosttySurface()
+      : this.resolveCurrentGhosttySurface({
+          terminalID: currentGhosttySurfaceID(),
+          tty: this.tty,
+        }) ?? this.resolveFocusedGhosttySurface();
     if (surface?.windowID && surface.terminalID) {
       this.currentGhosttyWindowID = surface.windowID;
       this.currentGhosttyTerminalID = surface.terminalID;

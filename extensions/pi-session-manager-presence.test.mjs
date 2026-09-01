@@ -762,7 +762,7 @@ test("registers the /register-window command", () => {
   assert.equal(typeof pi.commands.get("register-window")?.handler, "function");
 });
 
-test("registerWindow republishes the current Ghostty surface for Zellij sessions", () => {
+test("registerWindow republishes the current Ghostty surface for direct sessions", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   const timestamps = [10_000, 10_001, 10_002];
@@ -774,9 +774,10 @@ test("registerWindow republishes the current Ghostty surface for Zellij sessions
     pid: 123,
     now: () => timestamps.shift() ?? 10_999,
     terminalPath: () => "/dev/ttys001",
-    workspace: () => "manager-session",
-    zellijPaneID: () => "terminal_11",
+    workspace: () => undefined,
+    zellijPaneID: () => undefined,
     isInteractive: () => true,
+    writeTerminalTitleSequence: () => false,
     resolveCurrentGhosttySurface: (identity) => {
       resolvedIdentity = identity;
       return { windowID: "window-z", terminalID: "terminal-live" };
@@ -802,8 +803,8 @@ test("registerWindow republishes the current Ghostty surface for Zellij sessions
       cwd: "/projects/forms",
       pid: 123,
       tty: "/dev/ttys001",
-      workspace: "manager-session",
-      zellijPaneID: "terminal_11",
+      workspace: null,
+      zellijPaneID: null,
       terminalTitle: null,
       ghosttyWindowID: "window-z",
       ghosttyTerminalID: "terminal-live",
@@ -818,6 +819,58 @@ test("registerWindow republishes the current Ghostty surface for Zellij sessions
   }
 });
 
+test("registerWindow keeps two Zellij workspaces distinct despite a shared inherited Ghostty surface ID", () => {
+  const firstDirectory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-first-"));
+  const secondDirectory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-second-"));
+  const previousSurfaceID = process.env.GHOSTTY_SURFACE_ID;
+  process.env.GHOSTTY_SURFACE_ID = "terminal-inherited";
+
+  const makeBridge = (directory, workspaceName) =>
+    new LiveSessionPresenceBridge({
+      directory,
+      pid: 123,
+      terminalPath: () => "/dev/ttys001",
+      workspace: () => workspaceName,
+      zellijPaneID: () => "terminal_11",
+      isInteractive: () => true,
+      resolveCurrentGhosttySurface: () => ({ windowID: "window-inherited", terminalID: "terminal-inherited" }),
+      resolveFocusedGhosttySurface: () => undefined,
+      resolveGhosttySurface: (title) =>
+        title === `Pi Session ${workspaceName}`
+          ? { windowID: `window-${workspaceName}`, terminalID: `terminal-${workspaceName}` }
+          : undefined,
+    });
+
+  const firstBridge = makeBridge(firstDirectory, "workspace-one");
+  const secondBridge = makeBridge(secondDirectory, "workspace-two");
+
+  try {
+    firstBridge.start(context({ sessionID: "session-one", sessionFile: "/sessions/one.jsonl" }));
+    secondBridge.start(context({ sessionID: "session-two", sessionFile: "/sessions/two.jsonl" }));
+    firstBridge.registerWindow(context({ sessionID: "session-one", sessionFile: "/sessions/one.jsonl" }));
+    secondBridge.registerWindow(context({ sessionID: "session-two", sessionFile: "/sessions/two.jsonl" }));
+
+    const firstRecord = readRecord(join(firstDirectory, "session-one.json"));
+    const secondRecord = readRecord(join(secondDirectory, "session-two.json"));
+    assert.deepEqual(
+      [firstRecord.ghosttyWindowID, firstRecord.ghosttyTerminalID],
+      ["window-workspace-one", "terminal-workspace-one"],
+    );
+    assert.deepEqual(
+      [secondRecord.ghosttyWindowID, secondRecord.ghosttyTerminalID],
+      ["window-workspace-two", "terminal-workspace-two"],
+    );
+    assert.notEqual(firstRecord.ghosttyWindowID, secondRecord.ghosttyWindowID);
+  } finally {
+    if (previousSurfaceID === undefined) delete process.env.GHOSTTY_SURFACE_ID;
+    else process.env.GHOSTTY_SURFACE_ID = previousSurfaceID;
+    firstBridge.stop(context({ sessionID: "session-one", sessionFile: "/sessions/one.jsonl" }));
+    secondBridge.stop(context({ sessionID: "session-two", sessionFile: "/sessions/two.jsonl" }));
+    rmSync(firstDirectory, { recursive: true, force: true });
+    rmSync(secondDirectory, { recursive: true, force: true });
+  }
+});
+
 test("preserves registered Ghostty IDs on a Zellij heartbeat", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
@@ -828,7 +881,8 @@ test("preserves registered Ghostty IDs on a Zellij heartbeat", () => {
     workspace: () => "manager-session",
     zellijPaneID: () => "terminal_11",
     isInteractive: () => true,
-    resolveCurrentGhosttySurface: () => ({ windowID: "window-z", terminalID: "terminal-live" }),
+    resolveGhosttySurface: () => ({ windowID: "window-z", terminalID: "terminal-live" }),
+    resolveFocusedGhosttySurface: () => undefined,
   });
 
   try {
@@ -922,7 +976,7 @@ test("registerWindow fails safely when Ghostty identity cannot be determined", (
     workspace: () => "manager-session",
     zellijPaneID: () => "terminal_11",
     isInteractive: () => true,
-    resolveCurrentGhosttySurface: () => nextSurface,
+    resolveGhosttySurface: () => nextSurface,
     resolveFocusedGhosttySurface: () => undefined,
   });
 
