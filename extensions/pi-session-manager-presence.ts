@@ -304,6 +304,7 @@ export class LiveSessionPresenceBridge {
   private currentGhosttyAppPID: number | undefined;
   private currentGhosttyWindowID: string | undefined;
   private currentGhosttyTerminalID: string | undefined;
+  private automaticZellijWindowRegistrationAttempted = false;
 
   constructor(options: LiveSessionPresenceBridgeOptions = {}) {
     this.directory = options.directory ?? registryDirectory;
@@ -352,7 +353,10 @@ export class LiveSessionPresenceBridge {
     this.syncTerminalTitle(sessionID);
     const shouldResolveGhosttySurface = this.prepareGhosttySurfaceLookup();
     this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
-    if (shouldResolveGhosttySurface && this.syncGhosttySurface()) {
+    if (
+      (shouldResolveGhosttySurface && this.syncGhosttySurface())
+      || this.syncAutomaticZellijWindowRegistration()
+    ) {
       this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
     }
   }
@@ -404,10 +408,11 @@ export class LiveSessionPresenceBridge {
     this.currentWorkspace = this.getWorkspace();
     this.currentZellijPaneID = this.getZellijPaneID();
     this.syncTerminalTitle(sessionID);
+    this.automaticZellijWindowRegistrationAttempted = true;
 
     const state = ctx.isIdle() ? "idle" : "processing";
-    const surface = this.resolveFocusedGhosttySurface();
-    if (surface?.appPID && surface.appPID > 0 && surface.windowID && surface.terminalID) {
+    const surface = this.strictFocusedGhosttySurface();
+    if (surface) {
       this.currentGhosttyAppPID = surface.appPID;
       this.currentGhosttyWindowID = surface.windowID;
       this.currentGhosttyTerminalID = surface.terminalID;
@@ -468,6 +473,7 @@ export class LiveSessionPresenceBridge {
     this.currentGhosttyAppPID = undefined;
     this.currentGhosttyWindowID = undefined;
     this.currentGhosttyTerminalID = undefined;
+    this.automaticZellijWindowRegistrationAttempted = false;
   }
 
   private syncTerminalTitle(sessionID: string): void {
@@ -512,6 +518,31 @@ export class LiveSessionPresenceBridge {
     } catch (error) {
       console.error("pi-session-manager-presence: could not resolve Ghostty surface", error);
       return false;
+    }
+  }
+
+  private syncAutomaticZellijWindowRegistration(): boolean {
+    if (this.automaticZellijWindowRegistrationAttempted) return false;
+    if ((!this.currentWorkspace && !this.currentZellijPaneID) || !this.isInteractive()) return false;
+
+    this.automaticZellijWindowRegistrationAttempted = true;
+    if (this.currentGhosttyAppPID && this.currentGhosttyWindowID && this.currentGhosttyTerminalID) return false;
+
+    const surface = this.strictFocusedGhosttySurface();
+    if (!surface) return false;
+    this.currentGhosttyAppPID = surface.appPID;
+    this.currentGhosttyWindowID = surface.windowID;
+    this.currentGhosttyTerminalID = surface.terminalID;
+    return true;
+  }
+
+  private strictFocusedGhosttySurface(): Required<GhosttySurfaceIdentity> | undefined {
+    try {
+      const surface = this.resolveFocusedGhosttySurface();
+      if (!surface?.appPID || surface.appPID <= 0 || !surface.windowID || !surface.terminalID) return undefined;
+      return { appPID: surface.appPID, windowID: surface.windowID, terminalID: surface.terminalID };
+    } catch {
+      return undefined;
     }
   }
 
