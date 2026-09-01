@@ -28,6 +28,7 @@ type PendingPresencePublish = {
 };
 
 type GhosttySurfaceIdentity = {
+  appPID?: number;
   windowID: string;
   terminalID: string;
 };
@@ -123,7 +124,11 @@ function writeTerminalTitleSequence(value: string): boolean {
 export function matchUniqueGhosttySurface(surfaces: GhosttySurface[], title: string): GhosttySurfaceIdentity | undefined {
   const matches = surfaces.filter((surface) => surface.name === title || surface.name.startsWith(`${title} |`));
   if (matches.length !== 1) return undefined;
-  return { windowID: matches[0].windowID, terminalID: matches[0].terminalID };
+  return {
+    ...(matches[0].appPID ? { appPID: matches[0].appPID } : {}),
+    windowID: matches[0].windowID,
+    terminalID: matches[0].terminalID,
+  };
 }
 
 function ghosttyIsRunning(): boolean {
@@ -153,11 +158,19 @@ export function resolveCurrentGhosttySurface(identity: CurrentGhosttySurfaceIden
   const surfaces = listSurfaces();
   if (identity.terminalID) {
     const matches = surfaces.filter((surface) => surface.terminalID === identity.terminalID);
-    if (matches.length === 1) return { windowID: matches[0].windowID, terminalID: matches[0].terminalID };
+    if (matches.length === 1) return {
+      ...(matches[0].appPID ? { appPID: matches[0].appPID } : {}),
+      windowID: matches[0].windowID,
+      terminalID: matches[0].terminalID,
+    };
   }
   if (identity.tty) {
     const matches = surfaces.filter((surface) => surface.tty === identity.tty);
-    if (matches.length === 1) return { windowID: matches[0].windowID, terminalID: matches[0].terminalID };
+    if (matches.length === 1) return {
+      ...(matches[0].appPID ? { appPID: matches[0].appPID } : {}),
+      windowID: matches[0].windowID,
+      terminalID: matches[0].terminalID,
+    };
   }
   return undefined;
 }
@@ -169,11 +182,22 @@ export function resolveFocusedGhosttySurface(options: Pick<ResolveGhosttySurface
     const output = execFileSync(
       "/usr/bin/osascript",
       [
+        "-l",
+        "JavaScript",
         "-e",
-        `tell application "Ghostty"
-  set frontTerminal to focused terminal of selected tab of front window
-  return (id of front window as text) & (ASCII character 9) & (id of frontTerminal as text) & (ASCII character 9) & "focused"
-end tell`,
+        `ObjC.import("AppKit")
+ObjC.import("ScriptingBridge")
+function text(value) { return ObjC.unwrap(value) }
+function run() {
+  const running = $.NSWorkspace.sharedWorkspace.frontmostApplication
+  if (text(running.bundleIdentifier) !== "com.mitchellh.ghostty") throw new Error("Frontmost application is not Ghostty")
+  const pid = Number(text(running.processIdentifier))
+  const app = $.SBApplication.alloc.initWithProcessIdentifier(pid)
+  const frontWindow = app.valueForKey("frontWindow")
+  const selectedTab = frontWindow.valueForKey("selectedTab")
+  const terminal = selectedTab.valueForKey("focusedTerminal")
+  return [pid, text(frontWindow.valueForKey("id")), text(terminal.valueForKey("id"))].join("\\t")
+}`,
       ],
       {
         encoding: "utf8",
@@ -181,8 +205,10 @@ end tell`,
         timeout: ghosttyOsaScriptTimeoutMs,
       }
     );
-    const surface = parseGhosttySurfaces(output)[0];
-    return surface ? { windowID: surface.windowID, terminalID: surface.terminalID } : undefined;
+    const fields = output.trim().split("\t");
+    const appPID = Number(fields[0]);
+    if (!Number.isInteger(appPID) || appPID <= 0 || !fields[1] || !fields[2]) return undefined;
+    return { appPID, windowID: fields[1], terminalID: fields[2] };
   } catch {
     return undefined;
   }
@@ -193,16 +219,33 @@ function listGhosttySurfaces(): GhosttySurface[] {
     const output = execFileSync(
       "/usr/bin/osascript",
       [
+        "-l",
+        "JavaScript",
         "-e",
-        `tell application "Ghostty"
-  set output to ""
-  repeat with windowItem in every window
-    repeat with terminalItem in every terminal of windowItem
-      set output to output & (id of windowItem as text) & (ASCII character 9) & (id of terminalItem as text) & (ASCII character 9) & (name of terminalItem as text) & (ASCII character 10)
-    end repeat
-  end repeat
-  return output
-end tell`,
+        `ObjC.import("AppKit")
+ObjC.import("ScriptingBridge")
+function text(value) { return ObjC.unwrap(value) }
+function run() {
+  const applications = $.NSWorkspace.sharedWorkspace.runningApplications
+  const output = []
+  for (let appIndex = 0; appIndex < Number(applications.count); appIndex++) {
+    const running = applications.objectAtIndex(appIndex)
+    if (text(running.bundleIdentifier) !== "com.mitchellh.ghostty") continue
+    const pid = Number(text(running.processIdentifier))
+    const app = $.SBApplication.alloc.initWithProcessIdentifier(pid)
+    const windows = app.elementArrayWithCode(0x47776e64)
+    for (let windowIndex = 0; windowIndex < Number(windows.count); windowIndex++) {
+      const window = windows.objectAtIndex(windowIndex)
+      const terminals = window.elementArrayWithCode(0x4774726d)
+      for (let terminalIndex = 0; terminalIndex < Number(terminals.count); terminalIndex++) {
+        const terminal = terminals.objectAtIndex(terminalIndex)
+        const name = String(text(terminal.valueForKey("name"))).replace(/[\\r\\n]/g, " ")
+        output.push([pid, text(window.valueForKey("id")), text(terminal.valueForKey("id")), name].join("\\t"))
+      }
+    }
+  }
+  return output.join("\\n")
+}`,
       ],
       {
         encoding: "utf8",
@@ -224,15 +267,13 @@ export function parseGhosttySurfaces(output: string): GhosttySurface[] {
       const firstTab = line.indexOf("\t");
       const secondTab = firstTab === -1 ? -1 : line.indexOf("\t", firstTab + 1);
       const thirdTab = secondTab === -1 ? -1 : line.indexOf("\t", secondTab + 1);
-      if (firstTab === -1 || secondTab === -1) return [];
-      const windowID = line.slice(0, firstTab);
-      const terminalID = line.slice(firstTab + 1, secondTab);
-      const ttyCandidate = thirdTab === -1 ? undefined : line.slice(secondTab + 1, thirdTab);
-      const hasTTYField = typeof ttyCandidate === "string" && (ttyCandidate === "" || ttyCandidate.startsWith("/dev/"));
-      const tty = hasTTYField ? ttyCandidate || undefined : undefined;
-      const name = line.slice((hasTTYField && thirdTab !== -1 ? thirdTab : secondTab) + 1);
-      if (!windowID || !terminalID || !name) return [];
-      return [{ windowID, terminalID, ...(tty ? { tty } : {}), name }];
+      if (firstTab === -1 || secondTab === -1 || thirdTab === -1) return [];
+      const appPID = Number(line.slice(0, firstTab));
+      const windowID = line.slice(firstTab + 1, secondTab);
+      const terminalID = line.slice(secondTab + 1, thirdTab);
+      const name = line.slice(thirdTab + 1);
+      if (!Number.isInteger(appPID) || appPID <= 0 || !windowID || !terminalID || !name) return [];
+      return [{ appPID, windowID, terminalID, name }];
     });
 }
 
@@ -260,6 +301,7 @@ export class LiveSessionPresenceBridge {
   private currentWorkspace: string | undefined;
   private currentZellijPaneID: string | undefined;
   private currentTerminalTitle: string | undefined;
+  private currentGhosttyAppPID: number | undefined;
   private currentGhosttyWindowID: string | undefined;
   private currentGhosttyTerminalID: string | undefined;
 
@@ -364,15 +406,9 @@ export class LiveSessionPresenceBridge {
     this.syncTerminalTitle(sessionID);
 
     const state = ctx.isIdle() ? "idle" : "processing";
-    const isZellijSession = Boolean(this.currentWorkspace || this.currentZellijPaneID);
-    const surface = isZellijSession
-      ? (this.currentWorkspace ? this.resolveGhosttySurface(terminalTitle(this.currentWorkspace)) : undefined) ??
-        this.resolveFocusedGhosttySurface()
-      : this.resolveCurrentGhosttySurface({
-          terminalID: currentGhosttySurfaceID(),
-          tty: this.tty,
-        }) ?? this.resolveFocusedGhosttySurface();
-    if (surface?.windowID && surface.terminalID) {
+    const surface = this.resolveFocusedGhosttySurface();
+    if (surface?.appPID && surface.appPID > 0 && surface.windowID && surface.terminalID) {
+      this.currentGhosttyAppPID = surface.appPID;
       this.currentGhosttyWindowID = surface.windowID;
       this.currentGhosttyTerminalID = surface.terminalID;
       this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
@@ -382,6 +418,9 @@ export class LiveSessionPresenceBridge {
       };
     }
 
+    this.currentGhosttyAppPID = undefined;
+    this.currentGhosttyWindowID = undefined;
+    this.currentGhosttyTerminalID = undefined;
     this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
     return {
       ok: false,
@@ -426,6 +465,7 @@ export class LiveSessionPresenceBridge {
       this.sessionID = undefined;
     }
     this.currentTerminalTitle = undefined;
+    this.currentGhosttyAppPID = undefined;
     this.currentGhosttyWindowID = undefined;
     this.currentGhosttyTerminalID = undefined;
   }
@@ -451,6 +491,7 @@ export class LiveSessionPresenceBridge {
   private prepareGhosttySurfaceLookup(): boolean {
     if (this.currentWorkspace || this.currentZellijPaneID) return false;
     if (!this.currentTerminalTitle || !this.isInteractive()) {
+      this.currentGhosttyAppPID = undefined;
       this.currentGhosttyWindowID = undefined;
       this.currentGhosttyTerminalID = undefined;
       return false;
@@ -463,7 +504,8 @@ export class LiveSessionPresenceBridge {
     try {
       const surface = this.resolveGhosttySurface(this.currentTerminalTitle!);
       if (!surface?.windowID || !surface.terminalID) return false;
-      if (surface.windowID === this.currentGhosttyWindowID && surface.terminalID === this.currentGhosttyTerminalID) return false;
+      if (surface.appPID === this.currentGhosttyAppPID && surface.windowID === this.currentGhosttyWindowID && surface.terminalID === this.currentGhosttyTerminalID) return false;
+      this.currentGhosttyAppPID = surface.appPID;
       this.currentGhosttyWindowID = surface.windowID;
       this.currentGhosttyTerminalID = surface.terminalID;
       return true;
@@ -485,6 +527,7 @@ export class LiveSessionPresenceBridge {
       workspace: this.currentWorkspace ?? null,
       zellijPaneID: this.currentZellijPaneID ?? null,
       terminalTitle: this.currentTerminalTitle ?? null,
+      ...(this.currentGhosttyAppPID ? { ghosttyAppPID: this.currentGhosttyAppPID } : {}),
       ghosttyWindowID: this.currentGhosttyWindowID ?? null,
       ghosttyTerminalID: this.currentGhosttyTerminalID ?? null,
       state,
