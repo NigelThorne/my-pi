@@ -92,57 +92,12 @@ _pi_ghostty_consume_managed_contract() {
   done
 }
 
+# Hand managed Session Manager requests to the dedicated launch helper.
 _pi_ghostty_run_managed_launch() {
-  local action=${PI_GHOSTTY_ZELLIJ_ACTION-}
-  local workspace=${PI_GHOSTTY_ZELLIJ_WORKSPACE-}
-  local working_directory=${PI_GHOSTTY_ZELLIJ_WORKING_DIRECTORY-}
-  local pi_executable=${PI_GHOSTTY_ZELLIJ_PI_EXECUTABLE:-pi}
-  local argument_count=${PI_GHOSTTY_ZELLIJ_PI_ARGC-}
-  local index variable_name
-  local -a pi_arguments
+  local launcher=${PI_GHOSTTY_ZELLIJ_LAUNCHER:-$HOME/.my-pi/shell/ghostty-zellij-managed-launch.zsh}
 
-  _pi_ghostty_zellij_executable=${PI_GHOSTTY_ZELLIJ_EXECUTABLE:-/opt/homebrew/bin/zellij}
-
-  if ! [[ $action == run-pi || $action == attach ]] \
-      || ! [[ $workspace =~ '^[[:alnum:]][[:alnum:]_.-]{0,127}$' ]] \
-      || ! [[ $working_directory == /* ]] \
-      || ! [[ $_pi_ghostty_zellij_executable == /* ]] \
-      || ! [[ $pi_executable == /* || $pi_executable =~ '^[[:alnum:]_.-]+$' ]] \
-      || ! [[ $argument_count =~ '^[0-9]+$' ]] \
-      || (( argument_count > 16 )); then
-    _pi_ghostty_consume_managed_contract
-    return 2
-  fi
-
-  pi_arguments=()
-  for (( index = 0; index < argument_count; index += 1 )); do
-    variable_name="PI_GHOSTTY_ZELLIJ_PI_ARG_${index}"
-    if (( ! ${+parameters[$variable_name]} )); then
-      _pi_ghostty_consume_managed_contract
-      return 2
-    fi
-    pi_arguments+=("${(P)variable_name}")
-  done
-
-  _pi_ghostty_consume_managed_contract
-
-  if ! _pi_ghostty_bootstrap_zellij list-sessions --short --no-formatting 2>/dev/null \
-      | /usr/bin/grep -Fxq -- "$workspace"; then
-    _pi_ghostty_bootstrap_zellij attach --create-background "$workspace" || return 1
-  fi
-
-  if [[ $action == run-pi ]]; then
-    _pi_ghostty_bootstrap_zellij \
-      --session "$workspace" \
-      run --close-on-exit --cwd "$working_directory" -- \
-      /usr/bin/env \
-      "PI_GHOSTTY_APP_PID=$PI_GHOSTTY_APP_PID" \
-      "PI_GHOSTTY_PARENT_TTY=$PI_GHOSTTY_PARENT_TTY" \
-      "PI_GHOSTTY_HANDSHAKE_TOKEN=$PI_GHOSTTY_HANDSHAKE_TOKEN" \
-      "$pi_executable" "${pi_arguments[@]}" || return 1
-  fi
-
-  _pi_ghostty_bootstrap_exec_zellij attach "$workspace"
+  [[ -r $launcher ]] || return 127
+  exec /bin/zsh "$launcher"
 }
 
 _pi_ghostty_zellij_bootstrap() {
