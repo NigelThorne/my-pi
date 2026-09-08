@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly label="com.nigelthorne.mac-focus-tracker"
+readonly uid="$(id -u)"
+readonly domain="gui/${uid}"
+readonly binary="${HOME}/.my-pi/bin/mac-focus-tracker"
+readonly log_dir="${HOME}/Library/Application Support/mac-focus-tracker"
+readonly event_log="${log_dir}/focus.jsonl"
+readonly plist="${HOME}/Library/LaunchAgents/${label}.plist"
+readonly template="${script_dir}/${label}.plist.template"
+readonly stdout_log="${log_dir}/launchd.stdout.log"
+readonly stderr_log="${log_dir}/launchd.stderr.log"
+
+dry_run=false
+if [[ "${1:-}" == "--dry-run" ]]; then
+  dry_run=true
+elif [[ $# -ne 0 ]]; then
+  echo "usage: $0 [--dry-run]" >&2
+  exit 64
+fi
+
+print_command() {
+  printf '+' >&2
+  printf ' %q' "$@" >&2
+  printf '\n' >&2
+}
+
+run() {
+  print_command "$@"
+  if [[ "${dry_run}" == false ]]; then
+    "$@"
+  fi
+}
+
+render_plist() {
+  if [[ "${dry_run}" == true ]]; then
+    printf '+ render %q -> %q\n' "${template}" "${plist}" >&2
+    return
+  fi
+
+  python3 - "${template}" "${plist}" "${binary}" "${event_log}" "${stdout_log}" "${stderr_log}" <<'PY'
+from pathlib import Path
+import sys
+
+template, destination, binary, event_log, stdout_log, stderr_log = map(Path, sys.argv[1:])
+content = template.read_text()
+for key, value in {
+    "__BINARY__": binary,
+    "__EVENT_LOG__": event_log,
+    "__STDOUT_LOG__": stdout_log,
+    "__STDERR_LOG__": stderr_log,
+}.items():
+    content = content.replace(key, str(value))
+destination.write_text(content)
+PY
+}
+
+if [[ ! -f "${template}" ]]; then
+  echo "missing LaunchAgent template: ${template}" >&2
+  exit 1
+fi
+
+if [[ "${dry_run}" == true ]]; then
+  printf '+ (cd %q && swift build -c release)\n' "${script_dir}" >&2
+else
+  (cd "${script_dir}" && swift build -c release)
+fi
+run mkdir -p "$(dirname "${binary}")" "${log_dir}" "$(dirname "${plist}")"
+run install -m 755 "${script_dir}/.build/release/mac-focus-tracker" "${binary}"
+render_plist
+
+if [[ "${dry_run}" == true ]]; then
+  print_command launchctl bootout "${domain}/${label}"
+else
+  launchctl bootout "${domain}/${label}" 2>/dev/null || true
+fi
+run launchctl bootstrap "${domain}" "${plist}"
+run launchctl print "${domain}/${label}"
+
+if [[ "${dry_run}" == false ]]; then
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+  printf 'Installed %s. Grant Accessibility permission to %s.\n' "${label}" "${binary}"
+  printf 'Events: %s\n' "${event_log}"
+fi
