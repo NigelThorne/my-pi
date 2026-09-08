@@ -37,6 +37,29 @@ run() {
   fi
 }
 
+wait_for_job_removal() {
+  for _ in {1..50}; do
+    if ! launchctl print "${domain}/${label}" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.1
+  done
+  echo "launchd did not remove ${label}" >&2
+  exit 1
+}
+
+wait_for_tracker_removal() {
+  local pattern="${app_bundle}/Contents/MacOS/mac-focus-tracker --output ${event_log}"
+  for _ in {1..50}; do
+    if ! pgrep -f "${pattern}" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.1
+  done
+  echo "previous focus tracker did not exit" >&2
+  exit 1
+}
+
 render_plist() {
   if [[ "${dry_run}" == true ]]; then
     printf '+ render %q -> %q\n' "${template}" "${plist}" >&2
@@ -77,6 +100,7 @@ run mkdir -p "${app_bundle}/Contents/MacOS" "$(dirname "${supervisor}")" "${log_
 run install -m 755 "${script_dir}/.build/release/mac-focus-tracker" "${app_bundle}/Contents/MacOS/mac-focus-tracker"
 run install -m 755 "${script_dir}/launch-supervisor.zsh" "${supervisor}"
 run install -m 644 "${app_info_template}" "${app_bundle}/Contents/Info.plist"
+run codesign --force --deep --sign - "${app_bundle}"
 render_plist
 
 if [[ "${dry_run}" == true ]]; then
@@ -84,7 +108,9 @@ if [[ "${dry_run}" == true ]]; then
   print_command pkill -TERM -f "${app_bundle}/Contents/MacOS/mac-focus-tracker --output ${event_log}"
 else
   launchctl bootout "${domain}/${label}" 2>/dev/null || true
+  wait_for_job_removal
   pkill -TERM -f "${app_bundle}/Contents/MacOS/mac-focus-tracker --output ${event_log}" 2>/dev/null || true
+  wait_for_tracker_removal
 fi
 run launchctl bootstrap "${domain}" "${plist}"
 run launchctl print "${domain}/${label}"
