@@ -6,12 +6,10 @@
   <string>com.nigelthorne.mac-focus-tracker</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/open</string>
-    <string>-W</string>
+    <string>__SUPERVISOR__</string>
     <string>__APP_BUNDLE__</string>
-    <string>--args</string>
-    <string>--output</string>
     <string>__EVENT_LOG__</string>
+    <string>__PID_FILE__</string>
   </array>
   <key>ProcessType</key>
   <string>Interactive</string>

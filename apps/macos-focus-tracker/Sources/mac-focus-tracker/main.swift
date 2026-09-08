@@ -6,28 +6,50 @@ import Foundation
 
 private enum CommandLineError: Error, CustomStringConvertible {
     case usage
-    case outputMustBeAbsolute(String)
+    case pathMustBeAbsolute(String)
 
     var description: String {
         switch self {
         case .usage:
-            return "usage: mac-focus-tracker --output <absolute path>"
-        case let .outputMustBeAbsolute(path):
-            return "output path must be absolute: \(path)"
+            return "usage: mac-focus-tracker --output <absolute path> [--pid-file <absolute path>]"
+        case let .pathMustBeAbsolute(path):
+            return "path must be absolute: \(path)"
         }
     }
 }
 
-private func outputURL(arguments: [String]) throws -> URL {
-    guard arguments.count == 3, arguments[1] == "--output" else {
-        throw CommandLineError.usage
+private struct Configuration {
+    let outputURL: URL
+    let pidFileURL: URL?
+}
+
+private func configuration(arguments: [String]) throws -> Configuration {
+    var outputURL: URL?
+    var pidFileURL: URL?
+    var arguments = Array(arguments.dropFirst())
+
+    while !arguments.isEmpty {
+        let option = arguments.removeFirst()
+        guard let path = arguments.first else { throw CommandLineError.usage }
+        arguments.removeFirst()
+        guard !path.isEmpty, (path as NSString).isAbsolutePath else {
+            throw CommandLineError.pathMustBeAbsolute(path)
+        }
+        let url = URL(fileURLWithPath: path, isDirectory: false)
+        switch option {
+        case "--output":
+            guard outputURL == nil else { throw CommandLineError.usage }
+            outputURL = url
+        case "--pid-file":
+            guard pidFileURL == nil else { throw CommandLineError.usage }
+            pidFileURL = url
+        default:
+            throw CommandLineError.usage
+        }
     }
 
-    let path = arguments[2]
-    guard !path.isEmpty, (path as NSString).isAbsolutePath else {
-        throw CommandLineError.outputMustBeAbsolute(path)
-    }
-    return URL(fileURLWithPath: path, isDirectory: false)
+    guard let outputURL else { throw CommandLineError.usage }
+    return Configuration(outputURL: outputURL, pidFileURL: pidFileURL)
 }
 
 private final class JSONLWriter {
@@ -65,6 +87,27 @@ private final class JSONLWriter {
 
     deinit {
         close()
+    }
+}
+
+private final class PIDFile {
+    private let url: URL
+
+    init(url: URL) throws {
+        self.url = url
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "\(getpid())\n".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    deinit {
+        remove()
     }
 }
 
@@ -356,7 +399,10 @@ private func writeStandardError(_ message: String) {
 }
 
 do {
-    let writer = try JSONLWriter(outputURL: outputURL(arguments: CommandLine.arguments))
+    let configuration = try configuration(arguments: CommandLine.arguments)
+    let pidFile = try configuration.pidFileURL.map(PIDFile.init)
+    defer { pidFile?.remove() }
+    let writer = try JSONLWriter(outputURL: configuration.outputURL)
     let tracker = FocusTracker(writer: writer)
     try tracker.start()
     CFRunLoopRun()
