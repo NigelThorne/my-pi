@@ -28,6 +28,39 @@ publish_status() {
   fi
 }
 
+publish_client_identity() {
+  local readiness_directory=$1 client_pid=$2 client_tty=$3
+  local temporary_path="${readiness_directory}/.client.$$.$RANDOM"
+  local client_path="${readiness_directory}/client"
+
+  valid_pid "$client_pid" && valid_tty "$client_tty" || return 1
+  if ! (umask 077; print -r -- "${client_pid}"$'\t'"${client_tty}" >| "$temporary_path"); then
+    /bin/rm -f -- "$temporary_path"
+    return 1
+  fi
+  if ! /bin/mv -f -- "$temporary_path" "$client_path"; then
+    /bin/rm -f -- "$temporary_path"
+    return 1
+  fi
+}
+
+prepare_socket_parent() {
+  local socket_path=$1 parent=${socket_path:h} owner mode old_umask
+  if [[ ! -e $parent ]]; then
+    old_umask=$(umask)
+    umask 077
+    /bin/mkdir -m 700 -- "$parent" 2>/dev/null || {
+      umask "$old_umask"
+      return 1
+    }
+    umask "$old_umask"
+  fi
+  [[ -d $parent && ! -L $parent ]] || return 1
+  owner=$(/usr/bin/stat -f %u "$parent" 2>/dev/null) || return 1
+  mode=$(/usr/bin/stat -f %Lp "$parent" 2>/dev/null) || return 1
+  [[ $owner == $EUID && $mode == 700 ]]
+}
+
 publish_attach_error() {
   local readiness_path=${PI_GHOSTTY_TMUX_READINESS_PATH-}
   local readiness_directory=${readiness_path:h}
@@ -127,6 +160,7 @@ run_pi() {
     || return 2
   read_pi_arguments "$argument_count" || return 2
   pi_arguments=("${reply[@]}")
+  prepare_socket_parent "$socket_path" || return 2
 
   environment_arguments=(
     -e "PI_GHOSTTY_TMUX_EXECUTABLE=$executable"
@@ -220,6 +254,8 @@ attach_controller() {
         (( remaining > 0.0 )) || controller_failure timeout
         if server_route_valid "$remaining" "$executable" "$socket_path" \
             "$expected_server_pid" "$expected_server_start" "$session_id" "$window_id" "$pane_id"; then
+          publish_client_identity "$readiness_directory" "${fields[1]}" "${fields[2]}" \
+            || controller_failure readiness-write-failed
           publish_status "$readiness_directory" ready || controller_failure readiness-write-failed
           exit 0
         fi

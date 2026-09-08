@@ -84,6 +84,7 @@ readonly TEST_SERVER_START=$(LC_ALL=C /bin/ps -p "$TEST_SERVER_PID" -o lstart= |
 
 run_directory=$(new_case)
 /bin/mkdir "$run_directory/project with space"
+readonly run_socket_directory="$run_directory/private socket"
 : > "$run_directory/pi"
 /bin/chmod 700 "$run_directory/pi"
 if MOCK_SCENARIO=run \
@@ -91,7 +92,7 @@ if MOCK_SCENARIO=run \
     MOCK_READINESS_DIRECTORY="$run_directory/readiness" \
     PI_GHOSTTY_TMUX_ACTION=run-pi \
     PI_GHOSTTY_TMUX_EXECUTABLE="$run_directory/tmux" \
-    PI_GHOSTTY_TMUX_SOCKET_PATH="$run_directory/socket" \
+    PI_GHOSTTY_TMUX_SOCKET_PATH="$run_socket_directory/socket" \
     PI_GHOSTTY_TMUX_WORKSPACE=pi-test-unique \
     PI_GHOSTTY_TMUX_WORKING_DIRECTORY="$run_directory/project with space" \
     PI_GHOSTTY_TMUX_PI_EXECUTABLE="$run_directory/pi" \
@@ -107,7 +108,9 @@ if MOCK_SCENARIO=run \
     /bin/zsh "$HELPER" >"$run_directory/output" 2>&1; then run_status=0; else run_status=$?; fi
 run_calls=$(<"$run_directory/calls")
 assert_equal "run-pi succeeds" "$run_status" 0
-assert_contains "run-pi uses the explicit socket" "$run_calls" "-S $run_directory/socket new-session"
+assert_contains "run-pi uses the explicit socket" "$run_calls" "-S ${(q)run_socket_directory}/socket new-session"
+[[ -d $run_socket_directory && ! -L $run_socket_directory ]] && pass "run-pi creates a fresh socket parent" || fail "run-pi creates a fresh socket parent"
+assert_equal "run-pi socket parent is private" "$(/usr/bin/stat -f %Lp "$run_socket_directory" 2>/dev/null)" 700
 assert_contains "run-pi creates the unique requested session" "$run_calls" "-s pi-test-unique"
 assert_contains "run-pi preserves spaced cwd as one argument" "$run_calls" "-c $run_directory/project\\ with\\ space"
 assert_contains "run-pi directly executes Pi" "$run_calls" "$run_directory/pi --session /tmp/session\\ with\\ space.jsonl"
@@ -141,6 +144,9 @@ attach_calls=$(<"$attach_directory/calls")
 assert_equal "attach succeeds" "$attach_status" 0
 attach_readiness=$([[ -f "$attach_directory/readiness/status" ]] && <"$attach_directory/readiness/status" || print -r -- missing)
 assert_equal "attach publishes ready after client ownership is verified" "$attach_readiness" ready
+attach_client=$([[ -f "$attach_directory/readiness/client" ]] && <"$attach_directory/readiness/client" || print -r -- missing)
+attach_owner_pid=$(<"$attach_directory/owner-pid")
+assert_equal "attach privately publishes the controller-validated client identity" "$attach_client" "${attach_owner_pid}"$'\t/dev/ttys123'
 assert_contains "attach validates target on the explicit socket" "$attach_calls" "display-message -p -t %7"
 assert_contains "attach starts one client for the existing session" "$attach_calls" 'attach-session -t \$2'
 assert_contains "attach selects the exact existing window" "$attach_calls" "select-window -t @3"
