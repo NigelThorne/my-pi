@@ -36,7 +36,15 @@ if (( ! $+functions[_pi_ghostty_tmux_bootstrap_context] )); then
   _pi_ghostty_tmux_bootstrap_context() {
     local context_script=${PI_GHOSTTY_CONTEXT_SCRIPT:-$HOME/.my-pi/shell/ghostty-context.zsh}
     [[ -r $context_script ]] || return 1
-    _pi_ghostty_tmux_bootstrap_bounded 2.0 /usr/bin/env \
+    local -a context_environment
+    # Ghostty may have inherited an old Pi route token when the app started.
+    # Ordinary windows need unique probes; explicit managed requests retain
+    # their token for the claim-once launch contract.
+    if [[ ${PI_GHOSTTY_TMUX_BOOTSTRAP_MODE-} != managed \
+        && ${PI_GHOSTTY_ZELLIJ_BOOTSTRAP_MODE-} != managed ]]; then
+      context_environment=(-u PI_GHOSTTY_HANDSHAKE_TOKEN)
+    fi
+    _pi_ghostty_tmux_bootstrap_bounded 2.0 /usr/bin/env "${context_environment[@]}" \
       PI_GHOSTTY_CONTEXT_PID=$$ \
       PI_GHOSTTY_CONTEXT_RESOLVE_SURFACE=1 \
       /bin/zsh "$context_script"
