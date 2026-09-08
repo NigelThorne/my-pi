@@ -65,7 +65,7 @@ export function findOperationalPromise(text) {
 
 export function shellStartsDurableExecutor(command) {
   const value = String(command ?? "");
-  return /\b(?:nohup|disown|setsid)\b|\b(?:tmux\s+(?:new-session|new-window)|zellij\s+action\s+new-pane)\b|(?<!&)&(?!&)/.test(
+  return /\b(?:nohup|disown|setsid)\b|\btmux(?:\s+(?:-[SLf]\s+(?:"[^"]*"|'[^']*'|[^\s;]+)|-[A-Za-z]+))*\s+(?:new-session|new-window|split-window)\b|\bzellij\s+action\s+new-pane\b|(?<!&)&(?!&)/.test(
     value,
   );
 }
