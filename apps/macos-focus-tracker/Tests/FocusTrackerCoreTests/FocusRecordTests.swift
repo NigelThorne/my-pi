@@ -27,6 +27,21 @@ final class FocusRecordTests: XCTestCase {
         XCTAssertNotNil(object["timestamp"] as? String)
     }
 
+    func testEncodedLinePreservesMillisecondPrecision() throws {
+        let record = FocusRecord(
+            timestamp: Date(timeIntervalSince1970: 1.234),
+            event: .focusChanged
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(try record.encodedLine().dropLast().utf8)
+            ) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["timestamp"] as? String, "1970-01-01T00:00:01.234Z")
+    }
+
     func testEncodedLineOmitsWindowFieldsWhenUnavailable() throws {
         let record = FocusRecord(
             timestamp: Date(timeIntervalSince1970: 0),
