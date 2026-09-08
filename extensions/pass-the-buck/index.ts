@@ -3,12 +3,13 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readd
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 const RELAY_ENV = "PI_PASS_THE_BUCK_HANDOFF_ID";
 const MIN_RETRO_TOKENS = 16_384;
 const DEFAULT_POLL_INTERVAL_MS = 750;
 const SUMMARIZER_TIMEOUT_MS = 120_000;
+const MUX_IPC_TIMEOUT_MS = 5_000;
 
 type HandoffProtocol = {
   handoffId: string;
@@ -50,6 +51,12 @@ type ExtensionOptions = {
   launchSuccessor?: (options: LaunchOptions) => void;
   summarizeHandoff?: (input: HandoffSummaryInput) => Promise<string> | string;
   pollIntervalMs?: number;
+};
+
+type TmuxLaunchRuntime = {
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+  tmuxExecutable?: string;
 };
 
 const objectSchema = (properties: Record<string, unknown>, required: string[]) => ({
@@ -204,10 +211,72 @@ function successorCommand(options: LaunchOptions): string {
   ].join(" && ");
 }
 
+function childEnvironment(options: LaunchOptions, env: NodeJS.ProcessEnv): string[] {
+  return [
+    `${RELAY_ENV}=${options.handoffId}`,
+    ...(env.PATH ? [`PATH=${env.PATH}`] : []),
+    ...["PTC_ALLOW_UNSANDBOXED_SUBPROCESS", "PTC_USE_DOCKER"]
+      .filter((name) => env[name])
+      .map((name) => `${name}=${env[name]}`),
+  ];
+}
+
+function tmuxSocketPath(env: NodeJS.ProcessEnv): string {
+  const socketPath = env.TMUX?.split(",", 1)[0]?.trim();
+  if (!socketPath || !isAbsolute(socketPath)) {
+    throw new Error("/pass-the-buck could not determine the current tmux socket.");
+  }
+  return socketPath;
+}
+
+function launchInTmux(options: LaunchOptions, runtime: TmuxLaunchRuntime = {}): string {
+  const env = runtime.env ?? process.env;
+  const parentPane = env.TMUX_PANE?.trim();
+  if (!parentPane || !/^%\d+$/.test(parentPane)) {
+    throw new Error("/pass-the-buck could not determine the current tmux pane.");
+  }
+  const timeoutMs = runtime.timeoutMs ?? MUX_IPC_TIMEOUT_MS;
+  try {
+    return execFileSync(
+      runtime.tmuxExecutable ?? "tmux",
+      [
+        "-S",
+        tmuxSocketPath(env),
+        "split-window",
+        "-d",
+        "-h",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-t",
+        parentPane,
+        "-c",
+        options.cwd,
+        "/usr/bin/env",
+        ...childEnvironment(options, env),
+        "pi",
+        "--session-id",
+        options.successorSessionId,
+        options.prompt,
+      ],
+      { encoding: "utf8", env, timeout: timeoutMs },
+    ).trim();
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { signal?: string };
+    if (failure.code === "ETIMEDOUT" || failure.signal === "SIGTERM") {
+      throw new Error(`tmux request timed out after ${timeoutMs}ms.`);
+    }
+    throw error;
+  }
+}
+
 function currentTabId(): string {
   const paneId = process.env.ZELLIJ_PANE_ID;
-  if (!paneId) throw new Error("/pass-the-buck needs Zellij so the successor can stay open beside this session.");
-  const raw = execFileSync("zellij", ["action", "list-panes", "--json", "--all", "--tab"], { encoding: "utf8" });
+  if (!paneId) throw new Error("/pass-the-buck needs tmux or Zellij so the successor can stay open beside this session.");
+  const raw = execFileSync("zellij", ["action", "list-panes", "--json", "--all", "--tab"], {
+    encoding: "utf8",
+    timeout: MUX_IPC_TIMEOUT_MS,
+  });
   const panes = JSON.parse(raw) as Array<{ id: number | string; tab_id: number }>;
   const pane = panes.find((candidate) => String(candidate.id) === paneId);
   if (!pane) throw new Error(`Could not find current Zellij pane ${paneId}.`);
@@ -235,8 +304,16 @@ function launchInZellij(options: LaunchOptions): void {
       "-lc",
       command,
     ],
-    { encoding: "utf8" },
+    { encoding: "utf8", timeout: MUX_IPC_TIMEOUT_MS },
   );
+}
+
+function launchInCurrentMux(options: LaunchOptions): void {
+  if (process.env.TMUX && process.env.TMUX_PANE) {
+    launchInTmux(options);
+    return;
+  }
+  launchInZellij(options);
 }
 
 function isPredecessor(protocol: HandoffProtocol, ctx: any): boolean {
@@ -298,7 +375,7 @@ function waitForAnswer(
 export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: ExtensionOptions = {}): void {
   const relayRoot = options.relayRoot ?? defaultRelayRoot();
   const createHandoffId = options.createHandoffId ?? (() => randomUUID());
-  const launchSuccessor = options.launchSuccessor ?? launchInZellij;
+  const launchSuccessor = options.launchSuccessor ?? launchInCurrentMux;
   const createHandoffSummary = options.summarizeHandoff ?? summarizeHandoff;
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const consumedEventIds = new Set<string>();
@@ -465,7 +542,16 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   pi.on("session_shutdown", async () => stopPolling());
 }
 
-export const __test__ = { writeProtocol, appendEvent, readEvents, successorCommand, summarizerArgs, SUMMARIZER_TIMEOUT_MS };
+export const __test__ = {
+  writeProtocol,
+  appendEvent,
+  readEvents,
+  successorCommand,
+  summarizerArgs,
+  launchInTmux,
+  SUMMARIZER_TIMEOUT_MS,
+  MUX_IPC_TIMEOUT_MS,
+};
 
 export default function passTheBuckExtension(pi: ExtensionAPI): void {
   createPassTheBuckExtension(pi);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -135,6 +136,81 @@ test("successor launch preserves extension-critical PTC environment variables", 
   assert.ok(summaryArgs.includes("--offline"));
   assert.ok(summaryArgs.includes("@/tmp/context.json"));
   assert.equal(mod.__test__.SUMMARIZER_TIMEOUT_MS, 120_000);
+});
+
+test("tmux successor launches directly beside the exact parent pane with the requested cwd", async (t) => {
+  const { mod } = await setup(t);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-pass-the-buck-tmux-"));
+  const socketPath = path.join(root, "tmux.sock");
+  const parentCwd = path.join(root, "parent cwd");
+  const childCwd = path.join(root, "child cwd");
+  const binDir = path.join(root, "bin");
+  const observedPath = path.join(root, "observed.json");
+  fs.mkdirSync(parentCwd);
+  fs.mkdirSync(childCwd);
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(path.join(binDir, "pi"), `#!/bin/sh\nprintf '{"cwd":"%s","session":"%s","prompt":"%s","handoff":"%s"}\\n' "$PWD" "$2" "$3" "$PI_PASS_THE_BUCK_HANDOFF_ID" > ${JSON.stringify(observedPath)}\nsleep 30\n`, { mode: 0o755 });
+
+  const tmux = path.join(execFileSync("mise", ["where", "tmux@3.6a"], { encoding: "utf8", timeout: 5_000 }).trim(), "bin", "tmux");
+  const runTmux = (args) => execFileSync(tmux, ["-S", socketPath, ...args], { encoding: "utf8", timeout: 5_000 }).trim();
+  runTmux(["-f", "/dev/null", "new-session", "-d", "-s", "handoff-test", "-n", "parent", "-c", parentCwd, "sleep", "30"]);
+  t.after(() => {
+    try { runTmux(["kill-server"]); } catch {}
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const parentPane = runTmux(["display-message", "-p", "-t", "handoff-test:parent", "#{pane_id}"]);
+  const parentWindow = runTmux(["display-message", "-p", "-t", parentPane, "#{window_id}"]);
+  runTmux(["new-window", "-d", "-t", "handoff-test:", "-n", "other", "sleep", "30"]);
+
+  const childPane = mod.__test__.launchInTmux({
+    handoffId: "handoff-test",
+    cwd: childCwd,
+    successorSessionId: "successor",
+    prompt: "take over; don't expand $HOME",
+  }, {
+    env: {
+      ...process.env,
+      TMUX: `${socketPath},123,0`,
+      TMUX_PANE: parentPane,
+      PATH: `${binDir}:${process.env.PATH}`,
+      OBSERVED_PATH: observedPath,
+    },
+    tmuxExecutable: tmux,
+  });
+
+  const childWindow = runTmux(["display-message", "-p", "-t", childPane, "#{window_id}"]);
+  assert.equal(childWindow, parentWindow);
+  assert.equal(runTmux(["display-message", "-p", "-t", childPane, "#{pane_current_path}"]), fs.realpathSync(childCwd));
+  for (let attempt = 0; attempt < 50 && !fs.existsSync(observedPath); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.deepEqual(JSON.parse(fs.readFileSync(observedPath, "utf8")), {
+    cwd: childCwd,
+    session: "successor",
+    prompt: "take over; don't expand $HOME",
+    handoff: "handoff-test",
+  });
+});
+
+test("tmux successor IPC has a bounded timeout", async (t) => {
+  const { mod } = await setup(t);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-pass-the-buck-timeout-"));
+  const fakeTmux = path.join(root, "tmux");
+  fs.writeFileSync(fakeTmux, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const started = Date.now();
+
+  assert.throws(() => mod.__test__.launchInTmux({
+    handoffId: "handoff-test",
+    cwd: root,
+    successorSessionId: "successor",
+    prompt: "take over",
+  }, {
+    env: { ...process.env, TMUX: `${root}/socket,123,0`, TMUX_PANE: "%1" },
+    tmuxExecutable: fakeTmux,
+    timeoutMs: 100,
+  }), /timed out/i);
+  assert.ok(Date.now() - started < 2_000);
 });
 
 test("successor can ask the predecessor a question and receive its reply", async (t) => {

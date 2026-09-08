@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path';
+
 export type WatchdogActionType =
   | 'thread-help'
   | 'thread-update'
@@ -63,6 +65,36 @@ export function resolveCurrentActivityId(
 
 export function shouldCheckWaitingFor(activityId: string | undefined): boolean {
   return Boolean(activityId);
+}
+
+export interface PaneRenameCommand {
+  executable: 'tmux' | 'zellij';
+  args: string[];
+  backend: 'tmux' | 'zellij';
+}
+
+export function paneRenameCommand(
+  displayName: string,
+  env: Record<string, string | undefined>,
+): PaneRenameCommand | undefined {
+  const tmuxPane = env['TMUX_PANE']?.trim();
+  if (env['TMUX'] && tmuxPane) {
+    const socketPath = env['TMUX'].split(',', 1)[0]?.trim();
+    if (!socketPath || !isAbsolute(socketPath) || !/^%\d+$/.test(tmuxPane)) return undefined;
+    return {
+      executable: 'tmux',
+      args: ['-S', socketPath, 'select-pane', '-t', tmuxPane, '-T', displayName],
+      backend: 'tmux',
+    };
+  }
+
+  const zellijPane = env['ZELLIJ_PANE_ID']?.trim();
+  if (!zellijPane) return undefined;
+  return {
+    executable: 'zellij',
+    args: ['action', 'rename-pane', '--pane-id', zellijPane, displayName],
+    backend: 'zellij',
+  };
 }
 
 const HELP_AFTER_MS = 2 * 60_000;

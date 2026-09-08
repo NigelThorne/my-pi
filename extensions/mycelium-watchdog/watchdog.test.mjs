@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   WorkWatchdog,
@@ -12,6 +16,7 @@ import {
   selectFreshestSessionCandidate,
   resolveCurrentActivityId,
   shouldCheckWaitingFor,
+  paneRenameCommand,
 } from './watchdog.ts';
 import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer } from './inbox.ts';
 
@@ -183,6 +188,51 @@ test('explicit progress during tool work resets idle timer before a false idle p
     watchdog.poll({ now: 210_000, activityId: 'activity:auth', agentBusy: false, connected: true }),
     [{ type: 'thread-help', activityId: 'activity:auth' }],
   );
+});
+
+test('pane naming prefers exact tmux socket and pane identity', () => {
+  assert.deepEqual(paneRenameCommand('Worker D', {
+    TMUX: '/tmp/worker.sock,123,0',
+    TMUX_PANE: '%7',
+    ZELLIJ_PANE_ID: '44',
+  }), {
+    executable: 'tmux',
+    args: ['-S', '/tmp/worker.sock', 'select-pane', '-t', '%7', '-T', 'Worker D'],
+    backend: 'tmux',
+  });
+});
+
+test('pane naming command renames an exact pane on an isolated tmux server', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mycelium-watchdog-tmux-'));
+  const socketPath = path.join(root, 'tmux.sock');
+  const tmux = path.join(execFileSync('mise', ['where', 'tmux@3.6a'], { encoding: 'utf8', timeout: 5_000 }).trim(), 'bin', 'tmux');
+  const runTmux = (args) => execFileSync(tmux, ['-S', socketPath, ...args], { encoding: 'utf8', timeout: 5_000 }).trim();
+  runTmux(['-f', '/dev/null', 'new-session', '-d', '-s', 'rename-test', 'sleep', '30']);
+  t.after(() => {
+    try { runTmux(['kill-server']); } catch {}
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const paneId = runTmux(['display-message', '-p', '-t', 'rename-test:', '#{pane_id}']);
+  const rename = paneRenameCommand('Worker D', { TMUX: `${socketPath},123,0`, TMUX_PANE: paneId });
+  execFileSync(tmux, rename.args, { timeout: 5_000 });
+
+  assert.equal(runTmux(['display-message', '-p', '-t', paneId, '#{pane_title}']), 'Worker D');
+});
+
+test('pane naming preserves the existing Zellij command', () => {
+  assert.deepEqual(paneRenameCommand('Worker D', { ZELLIJ_PANE_ID: '44' }), {
+    executable: 'zellij',
+    args: ['action', 'rename-pane', '--pane-id', '44', 'Worker D'],
+    backend: 'zellij',
+  });
+});
+
+test('pane naming fails closed for invalid tmux identity', () => {
+  assert.equal(paneRenameCommand('Worker D', {
+    TMUX: 'relative.sock,123,0',
+    TMUX_PANE: '%7',
+    ZELLIJ_PANE_ID: '44',
+  }), undefined);
 });
 
 test('routes watchdog actions to the right mechanism', () => {

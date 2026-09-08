@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from 'typebox';
 import { IdleInboxDelivery, InboxEventDispatcher, formatInboxSteer, type InboxSteerEvent } from './inbox.ts';
-import { WorkWatchdog, recoveryPrompt, retryPrompt, isInboundEvent, resolveCurrentActivityId, selectFreshestSessionCandidate, shouldCheckWaitingFor, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
+import { WorkWatchdog, paneRenameCommand, recoveryPrompt, retryPrompt, isInboundEvent, resolveCurrentActivityId, selectFreshestSessionCandidate, shouldCheckWaitingFor, type WatchdogAction, type TurnToolCall } from './watchdog.ts';
 
 interface InboxState {
   sourceSessionId?: string;
@@ -37,6 +37,7 @@ interface CursorState {
 // waiting on CI, a human, or another agent and should not be nagged rapidly.
 const INBOX_POLL_MS = 10_000;
 const WATCHDOG_POLL_MS = 60_000;
+const PANE_RENAME_TIMEOUT_MS = 5_000;
 
 function isMeaningfulProgressTool(toolName: string): boolean {
   return /^(read|bash|grep|find|ls|edit|write|ast_|run_tests|webfetch|websearch|pickup_work|pickup_handover|read_work|get_messages|find_messages|get_activities|get_awareness|list_work|view_file|get_page|list_pages|todo_|log|set_my_status|resolve_work|complete_activity|raise|decide|request_access|set_waiting_for|clear_waiting_for)$/.test(toolName);
@@ -198,25 +199,40 @@ export default function nigelMyceliumWatchdog(pi: ExtensionAPI) {
     if (!displayName || displayName === lastPaneRenameName) return;
 
     lastPaneRenameName = displayName;
-    const paneId = process.env['ZELLIJ_PANE_ID']?.trim();
-    if (!paneId) {
-      paneRenameOutcome = 'skipped: not in zellij';
+    const rename = paneRenameCommand(displayName, process.env);
+    if (!rename) {
+      paneRenameOutcome = 'skipped: no valid tmux or Zellij pane identity';
       void writeAudit(inbox);
       return;
     }
 
-    paneRenameOutcome = `renaming pane to ${displayName}`;
-    const child = spawn('zellij', ['action', 'rename-pane', '--pane-id', paneId, displayName], {
+    paneRenameOutcome = `renaming ${rename.backend} pane to ${displayName}`;
+    const child = spawn(rename.executable, rename.args, {
       stdio: 'ignore',
       detached: true,
       env: process.env,
     });
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      paneRenameOutcome = `${rename.backend} rename timed out after ${PANE_RENAME_TIMEOUT_MS}ms`;
+      child.kill();
+      void writeAudit(inbox);
+    }, PANE_RENAME_TIMEOUT_MS);
+    timeout.unref?.();
     child.on('error', (error) => {
-      paneRenameOutcome = `rename failed: ${error.message}`;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      paneRenameOutcome = `${rename.backend} rename failed: ${error.message}`;
       void writeAudit(inbox);
     });
     child.on('exit', (code) => {
-      paneRenameOutcome = code === 0 ? `renamed pane to ${displayName}` : `rename exited ${code}`;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      paneRenameOutcome = code === 0 ? `renamed ${rename.backend} pane to ${displayName}` : `${rename.backend} rename exited ${code}`;
       void writeAudit(inbox);
     });
     child.unref?.();
