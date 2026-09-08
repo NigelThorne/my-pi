@@ -3,6 +3,8 @@ import Foundation
 public struct FocusRecord: Codable, Equatable, Sendable {
     public enum Event: String, Codable, Sendable {
         case focusChanged = "focus_changed"
+        case focusedWindowObserved = "focused_window_observed"
+        case focusedWindowChanged = "focused_window_changed"
         case windowTitleChanged = "window_title_changed"
         case ready
         case accessibilityStateChanged = "accessibility_state_changed"

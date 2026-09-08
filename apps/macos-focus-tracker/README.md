@@ -20,6 +20,6 @@ Use `apps/macos-focus-tracker/install.sh --dry-run` to see the installation comm
 tail -f "$HOME/Library/Application Support/mac-focus-tracker/focus.jsonl"
 ```
 
-Each line is one JSON object. Events are `ready`, `focus_changed`, `accessibility_state_changed`, and `window_title_changed`. The process writes a `focus_changed` record when an app becomes frontmost. It writes `window_title_changed` records when an accessibility-compliant app changes the focused window or its title. Some apps do not expose a title or send title notifications.
+Each line is one JSON object. Events are `ready`, `focus_changed`, `accessibility_state_changed`, `focused_window_observed`, `focused_window_changed`, and `window_title_changed`. The process writes a `focus_changed` record when an app becomes frontmost. It writes `focused_window_observed` after attaching Accessibility to the current window and `focused_window_changed` when macOS reports a different focused window. `window_title_changed` means that the current window's title changed without necessarily changing focus. Some apps do not expose a title or send title notifications.
 
 Pi timeline entries and focus records are independent. Join them by timestamp when processing a work timeline.

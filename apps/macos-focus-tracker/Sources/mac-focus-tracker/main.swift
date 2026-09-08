@@ -269,12 +269,17 @@ private final class FocusTracker: @unchecked Sendable {
             AXObserverGetRunLoopSource(newObserver),
             .commonModes
         )
-        attachFocusedWindow(using: newObserver, applicationElement: applicationElement)
+        attachFocusedWindow(
+            using: newObserver,
+            applicationElement: applicationElement,
+            event: .focusedWindowObserved
+        )
     }
 
     private func attachFocusedWindow(
         using observer: AXObserver,
-        applicationElement: AXUIElement
+        applicationElement: AXUIElement,
+        event: FocusRecord.Event
     ) {
         if let observedWindowElement {
             AXObserverRemoveNotification(
@@ -294,7 +299,7 @@ private final class FocusTracker: @unchecked Sendable {
             let value,
             CFGetTypeID(value) == AXUIElementGetTypeID()
         else {
-            reportWindowTitle(nil)
+            reportWindow(event: event, title: nil)
             return
         }
 
@@ -306,12 +311,12 @@ private final class FocusTracker: @unchecked Sendable {
             kAXTitleChangedNotification as CFString,
             context
         ) == .success else {
-            reportWindowTitle(title(of: windowElement))
+            reportWindow(event: event, title: title(of: windowElement))
             return
         }
 
         observedWindowElement = windowElement
-        reportWindowTitle(title(of: windowElement))
+        reportWindow(event: event, title: title(of: windowElement))
     }
 
     private func detachAccessibilityObserver() {
@@ -353,9 +358,13 @@ private final class FocusTracker: @unchecked Sendable {
         if notification == kAXFocusedWindowChangedNotification as CFString,
             let applicationElement = observedApplicationElement
         {
-            attachFocusedWindow(using: observer, applicationElement: applicationElement)
+            attachFocusedWindow(
+                using: observer,
+                applicationElement: applicationElement,
+                event: .focusedWindowChanged
+            )
         } else if notification == kAXTitleChangedNotification as CFString {
-            reportWindowTitle(title(of: element))
+            reportWindow(event: .windowTitleChanged, title: title(of: element))
         }
     }
 
@@ -371,12 +380,12 @@ private final class FocusTracker: @unchecked Sendable {
         return value as? String
     }
 
-    private func reportWindowTitle(_ title: String?) {
+    private func reportWindow(event: FocusRecord.Event, title: String?) {
         let application = activeApplication
         write(
             FocusRecord(
                 timestamp: Date(),
-                event: .windowTitleChanged,
+                event: event,
                 applicationName: application?.localizedName,
                 bundleIdentifier: application?.bundleIdentifier,
                 processIdentifier: application?.processIdentifier,

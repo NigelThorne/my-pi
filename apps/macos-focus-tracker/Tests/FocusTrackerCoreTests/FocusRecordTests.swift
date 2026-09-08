@@ -64,6 +64,8 @@ final class FocusRecordTests: XCTestCase {
     func testSupportedEventsHaveDistinctJSONValuesAndOmitAbsentTitle() throws {
         let cases: [(FocusRecord, String)] = [
             (FocusRecord(timestamp: .distantPast, event: .focusChanged), "focus_changed"),
+            (FocusRecord(timestamp: .distantPast, event: .focusedWindowObserved), "focused_window_observed"),
+            (FocusRecord(timestamp: .distantPast, event: .focusedWindowChanged), "focused_window_changed"),
             (FocusRecord(timestamp: .distantPast, event: .windowTitleChanged), "window_title_changed"),
             (FocusRecord(timestamp: .distantPast, event: .ready), "ready"),
             (
@@ -89,7 +91,7 @@ final class FocusRecordTests: XCTestCase {
 
         let accessibilityObject = try XCTUnwrap(
             JSONSerialization.jsonObject(
-                with: Data(try cases[3].0.encodedLine().dropLast().utf8)
+                with: Data(try cases[5].0.encodedLine().dropLast().utf8)
             ) as? [String: Any]
         )
         XCTAssertEqual(accessibilityObject["accessibility_trusted"] as? Bool, false)
