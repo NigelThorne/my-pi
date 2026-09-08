@@ -10,7 +10,7 @@ It writes no network data. It records plaintext application names, bundle IDs, p
 apps/macos-focus-tracker/install.sh
 ```
 
-The installer builds the release executable at `~/.my-pi/bin/mac-focus-tracker`, installs `com.nigelthorne.mac-focus-tracker` in `~/Library/LaunchAgents`, bootstraps it for the current GUI user, and opens macOS Accessibility settings. Grant Accessibility permission to the installed executable. The tracker logs app focus before that permission is granted. It adds window-title records once macOS trusts it.
+The installer builds `~/.my-pi/apps/MacFocusTracker.app`, installs `com.nigelthorne.mac-focus-tracker` in `~/Library/LaunchAgents`, bootstraps it for the current GUI user, and opens macOS Accessibility settings. Grant Accessibility permission to the installed app bundle, not to a command-line binary. The tracker logs app focus before that permission is granted. It adds window-title records once macOS trusts the app.
 
 Use `apps/macos-focus-tracker/install.sh --dry-run` to see the installation commands without changing the system.
 

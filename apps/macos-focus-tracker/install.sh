@@ -5,7 +5,8 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly label="com.nigelthorne.mac-focus-tracker"
 readonly uid="$(id -u)"
 readonly domain="gui/${uid}"
-readonly binary="${HOME}/.my-pi/bin/mac-focus-tracker"
+readonly app_bundle="${HOME}/.my-pi/apps/MacFocusTracker.app"
+readonly app_info_template="${script_dir}/MacFocusTracker.app.Info.plist.template"
 readonly log_dir="${HOME}/Library/Application Support/mac-focus-tracker"
 readonly event_log="${log_dir}/focus.jsonl"
 readonly plist="${HOME}/Library/LaunchAgents/${label}.plist"
@@ -40,25 +41,26 @@ render_plist() {
     return
   fi
 
-  python3 - "${template}" "${plist}" "${binary}" "${event_log}" "${stdout_log}" "${stderr_log}" <<'PY'
+  python3 - "${template}" "${plist}" "${app_bundle}" "${event_log}" "${stdout_log}" "${stderr_log}" <<'PY'
 from pathlib import Path
+from xml.sax.saxutils import escape
 import sys
 
-template, destination, binary, event_log, stdout_log, stderr_log = map(Path, sys.argv[1:])
+template, destination, app_bundle, event_log, stdout_log, stderr_log = map(Path, sys.argv[1:])
 content = template.read_text()
 for key, value in {
-    "__BINARY__": binary,
+    "__APP_BUNDLE__": app_bundle,
     "__EVENT_LOG__": event_log,
     "__STDOUT_LOG__": stdout_log,
     "__STDERR_LOG__": stderr_log,
 }.items():
-    content = content.replace(key, str(value))
+    content = content.replace(key, escape(str(value)))
 destination.write_text(content)
 PY
 }
 
-if [[ ! -f "${template}" ]]; then
-  echo "missing LaunchAgent template: ${template}" >&2
+if [[ ! -f "${template}" || ! -f "${app_info_template}" ]]; then
+  echo "missing focus-tracker installation template" >&2
   exit 1
 fi
 
@@ -67,8 +69,9 @@ if [[ "${dry_run}" == true ]]; then
 else
   (cd "${script_dir}" && swift build -c release)
 fi
-run mkdir -p "$(dirname "${binary}")" "${log_dir}" "$(dirname "${plist}")"
-run install -m 755 "${script_dir}/.build/release/mac-focus-tracker" "${binary}"
+run mkdir -p "${app_bundle}/Contents/MacOS" "${log_dir}" "$(dirname "${plist}")"
+run install -m 755 "${script_dir}/.build/release/mac-focus-tracker" "${app_bundle}/Contents/MacOS/mac-focus-tracker"
+run install -m 644 "${app_info_template}" "${app_bundle}/Contents/Info.plist"
 render_plist
 
 if [[ "${dry_run}" == true ]]; then
@@ -81,6 +84,6 @@ run launchctl print "${domain}/${label}"
 
 if [[ "${dry_run}" == false ]]; then
   open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-  printf 'Installed %s. Grant Accessibility permission to %s.\n' "${label}" "${binary}"
+  printf 'Installed %s. Grant Accessibility permission to %s.\n' "${label}" "${app_bundle}"
   printf 'Events: %s\n' "${event_log}"
 fi

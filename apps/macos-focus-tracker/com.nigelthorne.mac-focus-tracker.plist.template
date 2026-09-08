@@ -6,7 +6,10 @@
   <string>com.nigelthorne.mac-focus-tracker</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__BINARY__</string>
+    <string>/usr/bin/open</string>
+    <string>-W</string>
+    <string>__APP_BUNDLE__</string>
+    <string>--args</string>
     <string>--output</string>
     <string>__EVENT_LOG__</string>
   </array>
