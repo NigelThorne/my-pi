@@ -102,6 +102,51 @@ test("/pass-the-buck launches a fresh successor with a generated handoff checkpo
   assert.deepEqual(ctx.notifications, [{ message: "Successor session launched. Waiting for handoff questions or takeover.", type: "info" }]);
 });
 
+test("an ambiguous launch timeout retains its relay and blocks another successor", async (t) => {
+  let launches = 0;
+  const { pi, relayRoot } = await setup(t, {
+    launchSuccessor: () => {
+      launches += 1;
+      throw Object.assign(new Error("tmux timed out after accepting split"), { code: "ETIMEDOUT" });
+    },
+  });
+  const ctx = makeContext();
+  await pi.commands.get("pass-the-buck").handler("continue", ctx);
+  assert.equal(fs.existsSync(path.join(relayRoot, "handoff-test", "protocol.json")), true);
+  await pi.commands.get("pass-the-buck").handler("retry", ctx);
+  assert.equal(launches, 1);
+  assert.match(ctx.notifications[0].message, /unknown|unconfirmed/i);
+  assert.match(ctx.notifications.at(-1).message, /pending/i);
+});
+
+test("a definite rejected launch can be retried without leaving a pending relay", async (t) => {
+  let launches = 0;
+  const { pi, relayRoot } = await setup(t, {
+    launchSuccessor: () => { launches += 1; throw new Error("no supported mux"); },
+  });
+  const ctx = makeContext();
+  await pi.commands.get("pass-the-buck").handler("continue", ctx);
+  assert.equal(fs.existsSync(path.join(relayRoot, "handoff-test")), false);
+  await pi.commands.get("pass-the-buck").handler("retry", ctx);
+  assert.equal(launches, 2);
+});
+
+test("concurrent checkpoints do not launch two successors", async (t) => {
+  let launches = 0;
+  let release;
+  const checkpoint = new Promise((resolve) => { release = resolve; });
+  const { pi } = await setup(t, {
+    summarizeHandoff: () => checkpoint,
+    launchSuccessor: () => { launches += 1; },
+  });
+  const ctx = makeContext();
+  const first = pi.commands.get("pass-the-buck").handler("first", ctx);
+  const second = pi.commands.get("pass-the-buck").handler("second", ctx);
+  release("checkpoint");
+  await Promise.all([first, second]);
+  assert.equal(launches, 1);
+});
+
 test("successor launch preserves extension-critical PTC environment variables", async (t) => {
   const { mod } = await setup(t);
   const previousDocker = process.env.PTC_USE_DOCKER;
@@ -209,7 +254,11 @@ test("tmux successor IPC has a bounded timeout", async (t) => {
     env: { ...process.env, TMUX: `${root}/socket,123,0`, TMUX_PANE: "%1" },
     tmuxExecutable: fakeTmux,
     timeoutMs: 100,
-  }), /timed out/i);
+  }), (error) => {
+    assert.match(error.message, /timed out/i);
+    assert.equal(error.code, "ETIMEDOUT");
+    return true;
+  });
   assert.ok(Date.now() - started < 2_000);
 });
 

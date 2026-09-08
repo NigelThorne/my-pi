@@ -264,7 +264,7 @@ function launchInTmux(options: LaunchOptions, runtime: TmuxLaunchRuntime = {}): 
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { signal?: string };
     if (failure.code === "ETIMEDOUT" || failure.signal === "SIGTERM") {
-      throw new Error(`tmux request timed out after ${timeoutMs}ms.`);
+      throw Object.assign(new Error(`tmux request timed out after ${timeoutMs}ms.`), { code: "ETIMEDOUT" });
     }
     throw error;
   }
@@ -420,6 +420,14 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
     }, pollIntervalMs);
   };
 
+  const reusePendingHandoff = (ctx: any): boolean => {
+    const pending = predecessorProtocol(relayRoot, ctx);
+    if (!pending) return false;
+    ctx.ui.notify(`Handoff ${pending.handoffId} is already pending. No additional successor was launched. Inspect that handoff before retrying.`, "warning");
+    startPredecessorPolling(ctx);
+    return true;
+  };
+
   pi.registerCommand("pass-the-buck", {
     description: "Launch an independent Pi successor and hand it the current work",
     handler: async (args: string, ctx: any) => {
@@ -434,6 +442,8 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
         return;
       }
 
+      if (reusePendingHandoff(ctx)) return;
+
       const request = args.trim() || "Continue the work already underway.";
       let summary: string;
       try {
@@ -447,6 +457,10 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
         ctx.ui.notify(`Could not generate a handoff checkpoint: ${error instanceof Error ? error.message : String(error)}`, "error");
         return;
       }
+
+      // Summarizing is asynchronous. Another invocation may have launched
+      // while this checkpoint was being generated.
+      if (reusePendingHandoff(ctx)) return;
 
       const handoffId = createHandoffId();
       const protocol = writeProtocol(relayRoot, {
@@ -467,6 +481,14 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
           prompt: successorPrompt(protocol),
         });
       } catch (error) {
+        const failure = error as NodeJS.ErrnoException & { signal?: string };
+        if (failure.code === "ETIMEDOUT" || failure.signal === "SIGTERM" || failure.signal === "SIGKILL") {
+          // A missing reply does not prove the split was rejected. Keep the
+          // successor's relay usable and prevent a second launch on retry.
+          ctx.ui.notify("Successor launch outcome is unknown. The handoff remains pending; inspect the existing successor before retrying.", "warning");
+          startPredecessorPolling(ctx);
+          return;
+        }
         try { rmSync(join(relayRoot, handoffId), { recursive: true, force: true }); } catch {}
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
         return;
