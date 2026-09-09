@@ -32,6 +32,8 @@ The tmux helpers coexist with `ghostty-zellij-*`; no global `PI_SUBAGENT_MUX=tmu
 
 A `Pi Route <id>` window title is the bootstrap's location probe, not an error or Pi conversation name. Ordinary windows get fresh probe IDs; managed requests retain their claim-once token. The title can remain visible until the terminal updates it.
 
+Ordinary startup passes the current Ghostty identity through `new-session -e`, rather than inheriting the tmux server's first window identity. Later panes and windows inherit their own session's values. Existing Pi processes are not rewritten; `/register-window` only republishes the identity they inherited and does not discover or repair a stale link.
+
 See the app's `docs/session-activation.md` and `docs/tmux-integration-audit.md` for its routing contract and coverage.
 
 ## Checks
@@ -42,6 +44,7 @@ python3 tests/zshrc-tmux.test.py
 python3 tests/tmux-detached-timeout.test.py
 zsh tests/ghostty-tmux-bootstrap.test.zsh
 python3 tests/ghostty-tmux-context.test.py
+python3 tests/tmux-ordinary-environment.test.py
 zsh tests/ghostty-tmux-managed-launch.test.zsh
 zsh tests/tmux-workflow-helpers.test.zsh
 node --test extensions/pass-the-buck/index.test.mjs

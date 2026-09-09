@@ -163,11 +163,26 @@ _pi_ghostty_tmux_start_ordinary() {
   local executable socket_path=${PI_GHOSTTY_TMUX_SOCKET_PATH-}
   executable=$(_pi_ghostty_tmux_executable) || return 127
 
+  # A running server otherwise gives every new session its first window's
+  # environment. Set only this session's identity, so its future child panes
+  # inherit the same owner without changing other sessions or global state.
+  local -a environment_arguments
+  environment_arguments=(
+    -e "PI_GHOSTTY_TMUX_EXECUTABLE=$executable"
+    -e "PI_GHOSTTY_TMUX_SOCKET_PATH=$socket_path"
+    -e "PI_GHOSTTY_APP_PID=${PI_GHOSTTY_APP_PID-}"
+    -e "PI_GHOSTTY_TTY=${PI_GHOSTTY_TTY-}"
+    -e "PI_GHOSTTY_PARENT_TTY=${PI_GHOSTTY_PARENT_TTY-}"
+    -e "PI_GHOSTTY_HANDSHAKE_TOKEN=${PI_GHOSTTY_HANDSHAKE_TOKEN-}"
+    -e "PI_GHOSTTY_WINDOW_ID=${PI_GHOSTTY_WINDOW_ID-}"
+    -e "PI_GHOSTTY_TERMINAL_ID=${PI_GHOSTTY_TERMINAL_ID-}"
+    -e "GHOSTTY_SURFACE_ID=${GHOSTTY_SURFACE_ID-}"
+  )
   if [[ -n $socket_path ]]; then
     [[ $socket_path == /* ]] || return 2
-    _pi_ghostty_tmux_bootstrap_exec "$executable" -S "$socket_path" new-session -c "$PWD"
+    _pi_ghostty_tmux_bootstrap_exec "$executable" -S "$socket_path" new-session -c "$PWD" "${environment_arguments[@]}"
   else
-    _pi_ghostty_tmux_bootstrap_exec "$executable" new-session -c "$PWD"
+    _pi_ghostty_tmux_bootstrap_exec "$executable" new-session -c "$PWD" "${environment_arguments[@]}"
   fi
 }
 
