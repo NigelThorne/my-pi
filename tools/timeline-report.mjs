@@ -9,11 +9,17 @@ function timestampMs(record) {
   return Number.isFinite(value) ? value : null;
 }
 
-export function parseJsonl(text) {
-  return text
-    .split(/\r?\n/)
-    .filter((line) => line.trim() !== "")
-    .map((line) => JSON.parse(line));
+export function parseJsonl(text, role = "input") {
+  const entries = [];
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    if (line.trim() === "") continue;
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      throw new Error(`invalid ${role} JSONL at line ${index + 1}`);
+    }
+  }
+  return entries;
 }
 
 export function selectActiveBranch(entries) {
@@ -235,14 +241,16 @@ function runCommand(args) {
   if (command.error) return usageError(command.error);
 
   try {
-    const sessionEntries = parseJsonl(readFileSync(command.sessionPath, "utf8"));
+    const sessionEntries = parseJsonl(readFileSync(command.sessionPath, "utf8"), "session");
     const focusEntries = command.focusPath === null
       ? []
-      : parseJsonl(readFileSync(command.focusPath, "utf8"));
+      : parseJsonl(readFileSync(command.focusPath, "utf8"), "focus");
     process.stdout.write(renderSessionToon(summarizeSession(sessionEntries, focusEntries)));
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error && /^invalid (session|focus) JSONL at line \d+$/.test(error.message)
+      ? error.message
+      : "unable to read local timeline data";
     process.stdout.write(`error: ${toonString(message)}\n`);
     return 1;
   }

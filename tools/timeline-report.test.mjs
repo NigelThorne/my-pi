@@ -178,6 +178,19 @@ test("session command reports a definitive empty state", (t) => {
   assert.equal(result.stdout, "session: \"0 timeline telemetry entries found\"\n");
 });
 
+test("command sanitizes malformed JSONL errors", (t) => {
+  const fixtures = withFixtures(t, {
+    session: "{\"type\":\"session\"}\nprivate prompt and tool output\n",
+  });
+
+  const result = runCli(["session", fixtures.session]);
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, "");
+  assert.equal(result.stdout, "error: \"invalid session JSONL at line 2\"\n");
+  assert.equal(result.stdout.includes("private prompt"), false);
+});
+
 test("command help describes the only supported invocation", () => {
   const expected = [
     `usage: ${JSON.stringify(usage)}`,
