@@ -235,8 +235,6 @@ attach() {
   local working_directory=${PI_GHOSTTY_ZELLIJ_WORKING_DIRECTORY-}
   local zellij_executable=${PI_GHOSTTY_ZELLIJ_EXECUTABLE-}
   local argument_count=${PI_GHOSTTY_ZELLIJ_PI_ARGC-}
-  local command_status
-  typeset -F deadline remaining
 
   if [[ $readiness_path != /* || ${readiness_path:t} != status \
         || ! -d $readiness_directory || -L $readiness_directory \
@@ -251,28 +249,10 @@ attach() {
     return $?
   fi
 
-  if ! zmodload zsh/datetime; then
-    publish_status "$readiness_directory" error:clock-unavailable || true
-    return 1
-  fi
-  deadline=$(( EPOCHREALTIME + 5.0 ))
-  remaining=$(( deadline - EPOCHREALTIME ))
-
-  if bootstrap_exists "$remaining" "$zellij_executable" "$bootstrap"; then
-    publish_status "$readiness_directory" error:bootstrap-exists || true
-    return 1
-  else
-    command_status=$?
-    if (( command_status == 2 )); then
-      publish_status "$readiness_directory" error:timeout || true
-      return 1
-    fi
-  fi
-
-  attach_controller \
-    "$$" "$zellij_executable" "$workspace" "$pane_id" "$bootstrap" "$readiness_directory" "$deadline" &
-
-  exec "$zellij_executable" attach --create "$bootstrap"
+  # Zellij 0.44 has no verified external command that attaches this new client
+  # to an exact pane. Fail before querying, creating, switching, or killing a session.
+  publish_status "$readiness_directory" error:unsupported-zellij-reattach || true
+  return 1
 }
 
 case ${PI_GHOSTTY_ZELLIJ_ACTION-} in

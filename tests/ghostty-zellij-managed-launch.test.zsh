@@ -243,42 +243,18 @@ assert_contains "run-pi layout preserves spaced Pi arguments" "$run_layout" '"/t
 assert_contains "run-pi layout keeps route variables" "$run_layout" 'PI_GHOSTTY_HANDSHAKE_TOKEN "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"'
 /bin/rm -rf "$run_directory"
 
-# Happy attach: one fresh client is switched by addressing only its bootstrap.
-happy_directory=$(new_case_directory)
-run_attach_case success "$happy_directory"
-happy_calls=$(<"$happy_directory/calls")
-wait_until "successful attach cleans its bootstrap" "[[ -f ${(q)happy_directory}/killed ]]" || true
-assert_equal "attach succeeds" "$ATTACH_STATUS" 0
-assert_equal "attach publishes ready only after switching" "$(<"$happy_directory/readiness/status")" ready
-assert_contains "attach starts one client in the bootstrap" "$happy_calls" 'attach --create pi-focus-TEST'
-assert_contains "attach polls clients only through the bootstrap" "$happy_calls" '--session pi-focus-TEST action list-clients'
-assert_contains "attach switches only the bootstrap client to the exact pane" "$happy_calls" '--session pi-focus-TEST action switch-session child-workspace --pane-id terminal_12'
-assert_contains "attach removes only its empty bootstrap" "$happy_calls" 'kill-session pi-focus-TEST'
-assert_not_contains "attach never creates a layout" "$happy_calls" '--layout-string'
-assert_not_contains "attach never targets attach --create at the destination" "$happy_calls" 'attach --create child-workspace'
-assert_not_contains "attach never invokes generated autostart" "$happy_calls" 'generate-auto-start'
-assert_not_contains "attach never runs Pi" "$happy_calls" '/custom/bin/pi'
-attach_line=$(command grep -n -m1 '^attach --create pi-focus-TEST$' "$happy_directory/calls" | cut -d: -f1)
-clients_line=$(command grep -n -m1 '^--session pi-focus-TEST action list-clients$' "$happy_directory/calls" | cut -d: -f1)
-switch_line=$(command grep -n -m1 '^--session pi-focus-TEST action switch-session child-workspace --pane-id terminal_12$' "$happy_directory/calls" | cut -d: -f1)
-kill_line=$(command grep -n -m1 '^kill-session pi-focus-TEST$' "$happy_directory/calls" | cut -d: -f1)
-if [[ -n $attach_line && -n $clients_line && -n $switch_line && -n $kill_line ]] \
-    && (( attach_line < clients_line && clients_line < switch_line && switch_line < kill_line )); then
-  pass "attach performs client start, scoped poll, switch, then cleanup in order"
+# Detached legacy Zellij reattach is rejected before any Zellij command.
+disabled_directory=$(new_case_directory)
+run_attach_case success "$disabled_directory"
+assert_equal "legacy attach returns nonzero" "$ATTACH_STATUS" 1
+assert_file_one_line_matching "legacy attach reports its safe compatibility limit" \
+  "$disabled_directory/readiness/status" '^error:unsupported-zellij-reattach$'
+if [[ ! -s "$disabled_directory/calls" ]]; then
+  pass "legacy attach invokes no Zellij command"
 else
-  fail "attach call order is unsafe (${happy_calls:q})"
+  fail "legacy attach invokes no Zellij command ($( <"$disabled_directory/calls" ))"
 fi
-if [[ -z $(command find "$happy_directory/readiness" -maxdepth 1 -type f ! -name status -print -quit) ]]; then
-  pass "atomic readiness leaves no temporary status file"
-else
-  fail "atomic readiness leaves no temporary status file"
-fi
-/bin/rm -rf "$happy_directory"
-
-# Every post-mutation failure reports an error and names only its own bootstrap.
-assert_failure_cleanup multiple
-assert_failure_cleanup switch-failure
-assert_failure_cleanup timeout
+/bin/rm -rf "$disabled_directory"
 
 # Malformed contracts fail before mutation but still report through a valid request path.
 invalid_directory=$(new_case_directory)
@@ -348,66 +324,6 @@ else
   fail "occupied readiness path mutates no Zellij session"
 fi
 /bin/rm -rf "$occupied_directory"
-
-# A blocked Zellij control call cannot extend the five-second readiness bound.
-zmodload zsh/datetime
-hung_directory=$(new_case_directory)
-typeset -F hung_started=$EPOCHREALTIME
-typeset -F hung_elapsed
-run_attach_case hung-command "$hung_directory"
-hung_elapsed=$(( EPOCHREALTIME - hung_started ))
-wait_until "hung command cleans its bootstrap" "[[ -f ${(q)hung_directory}/killed ]]" || true
-if (( ATTACH_STATUS != 0 )); then
-  pass "hung Zellij command returns nonzero"
-else
-  fail "hung Zellij command returns nonzero"
-fi
-if (( hung_elapsed < 5.8 )); then
-  pass "hung Zellij command stays inside the readiness bound"
-else
-  fail "hung Zellij command exceeded readiness bound (${hung_elapsed}s)"
-fi
-assert_file_one_line_matching "hung Zellij command publishes one bounded error" \
-  "$hung_directory/readiness/status" '^error:timeout$'
-hung_calls=$(<"$hung_directory/calls")
-assert_contains "hung Zellij command kills its request bootstrap" "$hung_calls" 'kill-session pi-focus-TEST'
-assert_not_contains "hung Zellij command never kills the target" "$hung_calls" 'kill-session child-workspace'
-/bin/rm -rf "$hung_directory"
-
-# If the foreground client is signalled away, the controller rolls back its request.
-signal_directory=$(new_case_directory)
-MOCK_SCENARIO=signal \
-  MOCK_STATE_DIR="$signal_directory" \
-  MOCK_CALL_LOG="$signal_directory/calls" \
-  MOCK_BOOTSTRAP=pi-focus-TEST \
-  MOCK_READINESS_DIRECTORY="$signal_directory/readiness" \
-  PI_GHOSTTY_ZELLIJ_ACTION=attach \
-  PI_GHOSTTY_ZELLIJ_WORKSPACE=child-workspace \
-  PI_GHOSTTY_ZELLIJ_PANE_ID=terminal_12 \
-  PI_GHOSTTY_ZELLIJ_BOOTSTRAP_SESSION=pi-focus-TEST \
-  PI_GHOSTTY_ZELLIJ_READINESS_PATH="$signal_directory/readiness/status" \
-  PI_GHOSTTY_ZELLIJ_WORKING_DIRECTORY=/tmp \
-  PI_GHOSTTY_ZELLIJ_EXECUTABLE="$signal_directory/zellij" \
-  PI_GHOSTTY_ZELLIJ_PI_ARGC=0 \
-  /bin/zsh "$HELPER" >"$signal_directory/output" 2>&1 &
-signal_pid=$!
-wait_until "signal case starts its client" "[[ -f ${(q)signal_directory}/attach.started ]]" || true
-/bin/kill -TERM "$signal_pid" 2>/dev/null || true
-wait "$signal_pid" 2>/dev/null
-signal_status=$?
-wait_until "signal case publishes its error" "[[ -f ${(q)signal_directory}/readiness/status ]]" || true
-wait_until "signal case cleans its bootstrap" "[[ -f ${(q)signal_directory}/killed ]]" || true
-signal_calls=$(<"$signal_directory/calls")
-if (( signal_status != 0 )); then
-  pass "signalled client returns nonzero"
-else
-  fail "signalled client returns nonzero"
-fi
-assert_file_one_line_matching "signalled client publishes one bounded error" \
-  "$signal_directory/readiness/status" '^error:client-exited$'
-assert_contains "signalled client kills its request bootstrap" "$signal_calls" 'kill-session pi-focus-TEST'
-assert_not_contains "signalled client never kills the target" "$signal_calls" 'kill-session child-workspace'
-/bin/rm -rf "$signal_directory"
 
 print -- "\n${passed} passed, ${failed} failed"
 (( failed == 0 ))
