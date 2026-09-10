@@ -112,6 +112,19 @@ private final class PIDFile {
 }
 
 private final class FocusTracker: @unchecked Sendable {
+    private static let ghosttyBundleIdentifier = "com.mitchellh.ghostty"
+    private let ghosttyRouteScript = NSAppleScript(source: """
+        tell application id "com.mitchellh.ghostty"
+            with timeout of 1 second
+                if not frontmost then return ""
+                set targetWindow to front window
+                set targetTab to selected tab of targetWindow
+                set targetTerminal to focused terminal of targetTab
+                return (id of targetWindow as text) & linefeed & (id of targetTerminal as text)
+            end timeout
+        end tell
+        """)
+
     private let writer: JSONLWriter
     private let workspace = NSWorkspace.shared
     private var activationObserver: NSObjectProtocol?
@@ -189,13 +202,16 @@ private final class FocusTracker: @unchecked Sendable {
 
     private func reportFocus(_ application: NSRunningApplication?) {
         activeApplication = application
+        let ghosttyRoute = resolveGhosttyRoute(for: application)
         write(
             FocusRecord(
                 timestamp: Date(),
                 event: .focusChanged,
                 applicationName: application?.localizedName,
                 bundleIdentifier: application?.bundleIdentifier,
-                processIdentifier: application?.processIdentifier
+                processIdentifier: application?.processIdentifier,
+                ghosttyWindowIdentifier: ghosttyRoute?.windowIdentifier,
+                ghosttyTerminalIdentifier: ghosttyRoute?.terminalIdentifier
             )
         )
 
@@ -382,6 +398,7 @@ private final class FocusTracker: @unchecked Sendable {
 
     private func reportWindow(event: FocusRecord.Event, title: String?) {
         let application = activeApplication
+        let ghosttyRoute = resolveGhosttyRoute(for: application)
         write(
             FocusRecord(
                 timestamp: Date(),
@@ -389,9 +406,41 @@ private final class FocusTracker: @unchecked Sendable {
                 applicationName: application?.localizedName,
                 bundleIdentifier: application?.bundleIdentifier,
                 processIdentifier: application?.processIdentifier,
-                windowTitle: title
+                windowTitle: title,
+                ghosttyWindowIdentifier: ghosttyRoute?.windowIdentifier,
+                ghosttyTerminalIdentifier: ghosttyRoute?.terminalIdentifier
             )
         )
+    }
+
+    private func resolveGhosttyRoute(
+        for application: NSRunningApplication?
+    ) -> GhosttyRoute? {
+        guard let application,
+            application.bundleIdentifier == Self.ghosttyBundleIdentifier,
+            !application.isTerminated
+        else {
+            return nil
+        }
+
+        let processIdentifier = application.processIdentifier
+        guard workspace.frontmostApplication?.processIdentifier == processIdentifier else {
+            return nil
+        }
+
+        var error: NSDictionary?
+        guard let scriptResult = ghosttyRouteScript?
+            .executeAndReturnError(&error)
+            .stringValue,
+            let route = GhosttyRoute.parse(scriptResult: scriptResult),
+            !application.isTerminated,
+            activeApplication?.processIdentifier == processIdentifier,
+            workspace.frontmostApplication?.processIdentifier == processIdentifier
+        else {
+            return nil
+        }
+
+        return route
     }
 
     private func write(_ record: FocusRecord) {

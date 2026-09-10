@@ -17,6 +17,8 @@ public struct FocusRecord: Codable, Equatable, Sendable {
     public let processIdentifier: Int32?
     public let windowTitle: String?
     public let accessibilityTrusted: Bool?
+    public let ghosttyWindowIdentifier: String?
+    public let ghosttyTerminalIdentifier: String?
 
     public init(
         timestamp: Date,
@@ -25,7 +27,9 @@ public struct FocusRecord: Codable, Equatable, Sendable {
         bundleIdentifier: String? = nil,
         processIdentifier: Int32? = nil,
         windowTitle: String? = nil,
-        accessibilityTrusted: Bool? = nil
+        accessibilityTrusted: Bool? = nil,
+        ghosttyWindowIdentifier: String? = nil,
+        ghosttyTerminalIdentifier: String? = nil
     ) {
         self.timestamp = timestamp
         self.event = event
@@ -34,6 +38,8 @@ public struct FocusRecord: Codable, Equatable, Sendable {
         self.processIdentifier = processIdentifier
         self.windowTitle = windowTitle
         self.accessibilityTrusted = accessibilityTrusted
+        self.ghosttyWindowIdentifier = ghosttyWindowIdentifier
+        self.ghosttyTerminalIdentifier = ghosttyTerminalIdentifier
     }
 
     public func encodedLine() throws -> String {
@@ -66,5 +72,7 @@ public struct FocusRecord: Codable, Equatable, Sendable {
         case processIdentifier = "process_identifier"
         case windowTitle = "window_title"
         case accessibilityTrusted = "accessibility_trusted"
+        case ghosttyWindowIdentifier = "ghostty_window_id"
+        case ghosttyTerminalIdentifier = "ghostty_terminal_id"
     }
 }

@@ -27,6 +27,27 @@ final class FocusRecordTests: XCTestCase {
         XCTAssertNotNil(object["timestamp"] as? String)
     }
 
+    func testEncodedLineIncludesGhosttyRouteWhenAvailable() throws {
+        let record = FocusRecord(
+            timestamp: Date(timeIntervalSince1970: 0),
+            event: .focusChanged,
+            applicationName: "Ghostty",
+            bundleIdentifier: "com.mitchellh.ghostty",
+            processIdentifier: 42,
+            ghosttyWindowIdentifier: "window-123",
+            ghosttyTerminalIdentifier: "terminal-456"
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(try record.encodedLine().dropLast().utf8)
+            ) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["ghostty_window_id"] as? String, "window-123")
+        XCTAssertEqual(object["ghostty_terminal_id"] as? String, "terminal-456")
+    }
+
     func testEncodedLinePreservesMillisecondPrecision() throws {
         let record = FocusRecord(
             timestamp: Date(timeIntervalSince1970: 1.234),
@@ -59,6 +80,8 @@ final class FocusRecordTests: XCTestCase {
 
         XCTAssertNil(object["window_title"])
         XCTAssertNil(object["window_identifier"])
+        XCTAssertNil(object["ghostty_window_id"])
+        XCTAssertNil(object["ghostty_terminal_id"])
     }
 
     func testSupportedEventsHaveDistinctJSONValuesAndOmitAbsentTitle() throws {

@@ -16,5 +16,7 @@
   <true/>
   <key>NSAccessibilityUsageDescription</key>
   <string>Mac Focus Tracker records the focused app and window titles in a local timeline file.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Mac Focus Tracker reads the focused Ghostty window and terminal IDs for the local focus timeline.</string>
 </dict>
 </plist>
