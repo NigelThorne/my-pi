@@ -117,10 +117,18 @@ private final class FocusTracker: @unchecked Sendable {
         tell application id "com.mitchellh.ghostty"
             with timeout of 1 second
                 if not frontmost then return ""
-                set targetWindow to front window
-                set targetTab to selected tab of targetWindow
-                set targetTerminal to focused terminal of targetTab
-                return (id of targetWindow as text) & linefeed & (id of targetTerminal as text)
+                set firstWindow to front window
+                set firstTab to selected tab of firstWindow
+                set firstTerminal to focused terminal of firstTab
+                set firstWindowID to id of firstWindow as text
+                set firstTerminalID to id of firstTerminal as text
+                set secondWindow to front window
+                set secondTab to selected tab of secondWindow
+                set secondTerminal to focused terminal of secondTab
+                set secondWindowID to id of secondWindow as text
+                set secondTerminalID to id of secondTerminal as text
+                if firstWindowID is not secondWindowID or firstTerminalID is not secondTerminalID then return ""
+                return firstWindowID & linefeed & firstTerminalID
             end timeout
         end tell
         """)
