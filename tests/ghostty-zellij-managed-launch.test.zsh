@@ -145,8 +145,8 @@ if [[ ${1-} == kill-session ]]; then
   exit 0
 fi
 
-if [[ ${1-} == --session && ${2-} == pi-test-session && ${3-} == --layout-string ]]; then
-  print -r -- "$4" > "$MOCK_STATE_DIR/layout"
+if [[ ${1-} == --layout-string ]]; then
+  print -r -- "$2" > "$MOCK_STATE_DIR/layout"
   exit 0
 fi
 
@@ -229,6 +229,8 @@ if MOCK_SCENARIO=run-pi \
     PI_GHOSTTY_APP_PID=300 \
     PI_GHOSTTY_PARENT_TTY=/dev/ttys123 \
     PI_GHOSTTY_HANDSHAKE_TOKEN=AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE \
+    PI_GHOSTTY_WINDOW_ID=window-managed \
+    PI_GHOSTTY_TERMINAL_ID=terminal-managed \
     /bin/zsh "$HELPER" >"$run_directory/output" 2>&1; then
   run_status=0
 else
@@ -237,10 +239,14 @@ fi
 run_calls=$(<"$run_directory/calls")
 run_layout=$([[ -f "$run_directory/layout" ]] && <"$run_directory/layout" || print -r -- '')
 assert_equal "run-pi uses the configured Zellij executable" "$run_status" 0
-assert_contains "run-pi starts one named session from a layout string" "$run_calls" '--session pi-test-session --layout-string'
+assert_contains "run-pi lets Zellij name the new session" "$run_calls" '--layout-string'
+assert_not_contains "run-pi does not assign a Zellij session name" "$run_calls" 'pi-test-session'
 assert_contains "run-pi layout directly executes configured Pi" "$run_layout" 'command="/custom/bin/pi"'
+assert_contains "run-pi closes its pane when Pi exits" "$run_layout" 'close_on_exit true'
 assert_contains "run-pi layout preserves spaced Pi arguments" "$run_layout" '"/tmp/session with space.jsonl"'
 assert_contains "run-pi layout keeps route variables" "$run_layout" 'PI_GHOSTTY_HANDSHAKE_TOKEN "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"'
+assert_contains "run-pi layout keeps the exact Ghostty window" "$run_layout" 'PI_GHOSTTY_WINDOW_ID "window-managed"'
+assert_contains "run-pi layout keeps the exact Ghostty terminal" "$run_layout" 'PI_GHOSTTY_TERMINAL_ID "terminal-managed"'
 /bin/rm -rf "$run_directory"
 
 # Detached legacy Zellij reattach is rejected before any Zellij command.

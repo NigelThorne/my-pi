@@ -113,6 +113,24 @@ run_case() {
         print -- 123E4567-E89B-12D3-A456-426614174000
       }
 
+      _pi_ghostty_bootstrap_context() {
+        case "$SCENARIO" in
+          outer|stale|managed|managed-replayed|invalid)
+            print -- "export PI_GHOSTTY_APP_PID=300"
+            print -- "export PI_GHOSTTY_TTY=/dev/ttys123"
+            print -- "export PI_GHOSTTY_PARENT_TTY=/dev/ttys123"
+            print -- "export PI_GHOSTTY_HANDSHAKE_TOKEN=123E4567-E89B-12D3-A456-426614174000"
+            print -- "export PI_GHOSTTY_WINDOW_ID=window-1"
+            print -- "export PI_GHOSTTY_TERMINAL_ID=terminal-1"
+            ;;
+          inner) return 1 ;;
+        esac
+      }
+
+      _pi_ghostty_bootstrap_claim_managed_request() {
+        [[ $SCENARIO != managed-replayed ]]
+      }
+
       _pi_ghostty_bootstrap_zellij() {
         print -r -- "zellij=${ZELLIJ-unset} args=${(j: :)${(q)@}}" >> "$ZELLIJ_CALL_LOG"
         if [[ $1 == setup && $2 == --generate-auto-start && $3 == zsh ]]; then
@@ -133,6 +151,17 @@ run_case() {
         export ZELLIJ_SESSION_NAME=stale-session
         export ZELLIJ_PANE_ID=99
       elif [[ $SCENARIO == managed ]]; then
+        export PI_GHOSTTY_ZELLIJ_BOOTSTRAP_MODE=managed
+        export PI_GHOSTTY_ZELLIJ_LAUNCHER="$TEST_MANAGED_LAUNCHER"
+        export PI_GHOSTTY_ZELLIJ_ACTION=attach
+        export PI_GHOSTTY_ZELLIJ_WORKSPACE=child-workspace
+        export PI_GHOSTTY_ZELLIJ_PANE_ID=terminal_12
+        export PI_GHOSTTY_ZELLIJ_BOOTSTRAP_SESSION=pi-focus-TEST
+        export PI_GHOSTTY_ZELLIJ_READINESS_PATH=/tmp/pi-focus-TEST/status
+        export PI_GHOSTTY_ZELLIJ_WORKING_DIRECTORY="/tmp/project with space"
+        export PI_GHOSTTY_ZELLIJ_EXECUTABLE=/custom/bin/zellij
+        export PI_GHOSTTY_ZELLIJ_PI_ARGC=0
+      elif [[ $SCENARIO == managed-replayed ]]; then
         export PI_GHOSTTY_ZELLIJ_BOOTSTRAP_MODE=managed
         export PI_GHOSTTY_ZELLIJ_LAUNCHER="$TEST_MANAGED_LAUNCHER"
         export PI_GHOSTTY_ZELLIJ_ACTION=attach
@@ -206,9 +235,13 @@ assert_contains "managed launch forwards configured Zellij" "$managed_output" "z
 assert_contains "managed attach forwards zero Pi arguments" "$managed_output" "pi_argc=0"
 assert_not_contains "managed launch skips ordinary generated autostart" "$managed_output" "args=setup --generate-auto-start zsh"
 
+managed_replayed_output=$(run_case managed-replayed)
+assert_not_contains "replayed managed request does not launch Pi" "$managed_replayed_output" "action=attach"
+assert_contains "replayed managed request starts ordinary Zellij" "$managed_replayed_output" "args=setup --generate-auto-start zsh"
+
 invalid_output=$(run_case invalid)
 assert_contains "invalid managed contract does not start Zellij" "$invalid_output" "started=0"
-assert_contains "invalid managed contract returns nonzero" "$invalid_output" "exit_status=1"
+assert_contains "invalid managed contract returns control to the host shell" "$invalid_output" "exit_status=0"
 assert_not_contains "invalid managed contract executes no Zellij commands" "$invalid_output" "args="
 
 assert_not_contains "phase 1 does not emit an OSC title" "$outer_output" $'\e]2;'

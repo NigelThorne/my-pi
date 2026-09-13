@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import registerPresenceExtension, { LiveSessionPresenceBridge, matchUniqueGhosttySurface, parseGhosttySurfaces, resolveGhosttySurface } from "./pi-session-manager-presence.ts";
+import registerPresenceExtension, { LiveSessionPresenceBridge, resolveTmuxRoute } from "./pi-session-manager-presence.ts";
+
+// The test runner itself may be hosted in tmux and a managed Ghostty window.
+// Unit tests must not inherit that route unless a case supplies it explicitly.
+for (const name of [
+  "TMUX", "TMUX_PANE", "ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID",
+  "PI_GHOSTTY_APP_PID", "PI_GHOSTTY_WINDOW_ID", "PI_GHOSTTY_TERMINAL_ID", "PI_GHOSTTY_PARENT_TTY",
+]) delete process.env[name];
 
 function context({ sessionID = "session-id", sessionFile = "/sessions/current.jsonl", idle = true } = {}) {
   return {
@@ -52,22 +59,32 @@ function readRecord(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-function makePi() {
+function makePi({ onAppend = () => {} } = {}) {
   const commands = new Map();
   const handlers = new Map();
+  const entries = [];
   return {
     commands,
     handlers,
+    entries,
     registerCommand(name, definition) {
       commands.set(name, definition);
     },
     on(name, handler) {
       handlers.set(name, handler);
     },
+    appendEntry(type, data) {
+      onAppend(type, data);
+      entries.push({ type, data });
+    },
   };
 }
 
-test("matchUniqueGhosttySurface returns an exact title match", () => {
+function entriesOfType(pi, type) {
+  return pi.entries.filter((entry) => entry.type === type);
+}
+
+test.skip("superseded: matchUniqueGhosttySurface returns an exact title match", () => {
   assert.deepEqual(
     matchUniqueGhosttySurface(
       [
@@ -80,7 +97,7 @@ test("matchUniqueGhosttySurface returns an exact title match", () => {
   );
 });
 
-test('matchUniqueGhosttySurface returns a stable "<title> |" prefix match', () => {
+test.skip('superseded: matchUniqueGhosttySurface returns a stable "<title> |" prefix match', () => {
   assert.deepEqual(
     matchUniqueGhosttySurface(
       [{ windowID: "window-a", terminalID: "terminal-a", name: "Pi Session session-id | bash" }],
@@ -90,14 +107,14 @@ test('matchUniqueGhosttySurface returns a stable "<title> |" prefix match', () =
   );
 });
 
-test("matchUniqueGhosttySurface returns undefined when no surface matches", () => {
+test.skip("superseded: matchUniqueGhosttySurface returns undefined when no surface matches", () => {
   assert.equal(
     matchUniqueGhosttySurface([{ windowID: "window-a", terminalID: "terminal-a", name: "Other title" }], "Pi Session session-id"),
     undefined
   );
 });
 
-test("matchUniqueGhosttySurface rejects duplicate matches", () => {
+test.skip("superseded: matchUniqueGhosttySurface rejects duplicate matches", () => {
   assert.equal(
     matchUniqueGhosttySurface(
       [
@@ -110,7 +127,7 @@ test("matchUniqueGhosttySurface rejects duplicate matches", () => {
   );
 });
 
-test("resolveGhosttySurface skips Ghostty surface listing when Ghostty is not running", () => {
+test.skip("superseded: resolveGhosttySurface skips Ghostty surface listing when Ghostty is not running", () => {
   let listed = false;
 
   assert.equal(
@@ -126,7 +143,7 @@ test("resolveGhosttySurface skips Ghostty surface listing when Ghostty is not ru
   assert.equal(listed, false);
 });
 
-test("parseGhosttySurfaces preserves PID scope and tabs in terminal names", () => {
+test.skip("superseded: parseGhosttySurfaces preserves PID scope and tabs in terminal names", () => {
   assert.deepEqual(parseGhosttySurfaces("8686\twindow-a\tterminal-a\tPi Session session-id\t|\tbash\n"), [
     { appPID: 8686, windowID: "window-a", terminalID: "terminal-a", name: "Pi Session session-id\t|\tbash" },
   ]);
@@ -433,7 +450,7 @@ test("publishes presence when a terminal title write fails, records no false tit
   }
 });
 
-test("publishes base presence before resolving Ghostty surface IDs, then republishes with resolved IDs", () => {
+test.skip("superseded: publishes base presence before resolving Ghostty surface IDs, then republishes with resolved IDs", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   const events = [];
@@ -502,7 +519,7 @@ test("publishes base presence before resolving Ghostty surface IDs, then republi
   }
 });
 
-test("keeps base presence when Ghostty resolution throws after the initial publish", () => {
+test.skip("superseded: keeps base presence when Ghostty resolution throws after the initial publish", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   let observedRecord;
@@ -569,7 +586,7 @@ test("keeps base presence when Ghostty resolution throws after the initial publi
   }
 });
 
-test("retries unresolved Ghostty surface lookups on later heartbeats", () => {
+test.skip("superseded: retries unresolved Ghostty surface lookups on later heartbeats", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   let attempts = 0;
@@ -604,7 +621,7 @@ test("retries unresolved Ghostty surface lookups on later heartbeats", () => {
   }
 });
 
-test("does not resolve Ghostty surface again after stable IDs have been captured", () => {
+test.skip("superseded: does not resolve Ghostty surface again after stable IDs have been captured", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   let resolveCalls = 0;
@@ -640,7 +657,7 @@ test("does not resolve Ghostty surface again after stable IDs have been captured
   }
 });
 
-test("does not query Ghostty for non-interactive sessions", () => {
+test.skip("superseded: does not query Ghostty for non-interactive sessions", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   let resolveCalls = 0;
@@ -672,7 +689,7 @@ test("does not query Ghostty for non-interactive sessions", () => {
   }
 });
 
-test("does not query Ghostty for Zellij-managed sessions", () => {
+test.skip("superseded: does not query Ghostty for Zellij-managed sessions", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   let resolveCalls = 0;
@@ -762,7 +779,375 @@ test("registers the /register-window command", () => {
   assert.equal(typeof pi.commands.get("register-window")?.handler, "function");
 });
 
-test("registerWindow republishes the frontmost Ghostty PID and exact surface tuple", () => {
+test("appends the initial complete managed Ghostty binding to the Pi session", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    managedGhosttyIdentity: () => ({
+      appPID: 300,
+      windowID: "window-1",
+      terminalID: "terminal-1",
+      parentTTY: "/dev/ttys123",
+    }),
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+
+    assert.deepEqual(entriesOfType(pi, "pi-session-manager-window-binding"), [{
+      type: "pi-session-manager-window-binding",
+      data: {
+        event: "ghostty_binding",
+        source: "pi-session-manager-presence",
+        sessionID: "session-id",
+        sessionFile: "/sessions/current.jsonl",
+        cwd: "/projects/forms",
+        ghosttyAppPID: 300,
+        ghosttyWindowID: "window-1",
+        ghosttyTerminalID: "terminal-1",
+        ghosttyParentTTY: "/dev/ttys123",
+      },
+    }]);
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("does not append duplicate managed Ghostty bindings on heartbeats", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  let identityReads = 0;
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    managedGhosttyIdentity: () => {
+      identityReads += 1;
+      return { appPID: 300, windowID: "window-1", terminalID: "terminal-1" };
+    },
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 5,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(identityReads > 1, true);
+    const bindingEntries = entriesOfType(pi, "pi-session-manager-window-binding");
+    assert.equal(bindingEntries.length, 1);
+    assert.equal("ghosttyParentTTY" in bindingEntries[0].data, false);
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("appends a new managed Ghostty binding after a rebind", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const bindingAppendObservations = [];
+  const pi = makePi({
+    onAppend: (type, data) => {
+      if (type === "pi-session-manager-window-binding") {
+        bindingAppendObservations.push({ event: data.event, publishedWindowID: existsSync(record) ? readRecord(record).ghosttyWindowID : undefined });
+      }
+    },
+  });
+  let identity = { appPID: 300, windowID: "window-1", terminalID: "terminal-1", parentTTY: "/dev/ttys123" };
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    managedGhosttyIdentity: () => identity,
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+    identity = { appPID: 301, windowID: "window-2", terminalID: "terminal-2", parentTTY: "/dev/ttys124" };
+    pi.handlers.get("agent_settled")({}, context());
+
+    assert.deepEqual(bindingAppendObservations, [
+      { event: "ghostty_binding", publishedWindowID: "window-1" },
+      { event: "ghostty_binding_ended", publishedWindowID: "window-2" },
+      { event: "ghostty_binding", publishedWindowID: "window-2" },
+    ]);
+    assert.deepEqual(entriesOfType(pi, "pi-session-manager-window-binding").map(({ data }) => data), [
+      {
+        event: "ghostty_binding",
+        source: "pi-session-manager-presence",
+        sessionID: "session-id",
+        sessionFile: "/sessions/current.jsonl",
+        cwd: "/projects/forms",
+        ghosttyAppPID: 300,
+        ghosttyWindowID: "window-1",
+        ghosttyTerminalID: "terminal-1",
+        ghosttyParentTTY: "/dev/ttys123",
+      },
+      {
+        event: "ghostty_binding_ended",
+        source: "pi-session-manager-presence",
+        sessionID: "session-id",
+        sessionFile: "/sessions/current.jsonl",
+        cwd: "/projects/forms",
+        ghosttyAppPID: 300,
+        ghosttyWindowID: "window-1",
+        ghosttyTerminalID: "terminal-1",
+        ghosttyParentTTY: "/dev/ttys123",
+      },
+      {
+        event: "ghostty_binding",
+        source: "pi-session-manager-presence",
+        sessionID: "session-id",
+        sessionFile: "/sessions/current.jsonl",
+        cwd: "/projects/forms",
+        ghosttyAppPID: 301,
+        ghosttyWindowID: "window-2",
+        ghosttyTerminalID: "terminal-2",
+        ghosttyParentTTY: "/dev/ttys124",
+      },
+    ]);
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("appends an end event when a managed Ghostty identity is lost", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  let identity = { appPID: 300, windowID: "window-1", terminalID: "terminal-1" };
+  registerPresenceExtension(pi, {
+    directory,
+    managedGhosttyIdentity: () => identity,
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+    identity = {};
+    pi.handlers.get("agent_settled")({}, context());
+
+    const bindingEntries = entriesOfType(pi, "pi-session-manager-window-binding");
+    assert.deepEqual(bindingEntries.map(({ data }) => data.event), ["ghostty_binding", "ghostty_binding_ended"]);
+    assert.deepEqual(bindingEntries[1].data, {
+      event: "ghostty_binding_ended",
+      source: "pi-session-manager-presence",
+      sessionID: "session-id",
+      sessionFile: "/sessions/current.jsonl",
+      cwd: "/projects/forms",
+      ghosttyAppPID: 300,
+      ghosttyWindowID: "window-1",
+      ghosttyTerminalID: "terminal-1",
+    });
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("appends an end event when the Pi session shuts down", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  registerPresenceExtension(pi, {
+    directory,
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "window-1", terminalID: "terminal-1" }),
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+    pi.handlers.get("session_shutdown")({}, context());
+
+    assert.deepEqual(
+      entriesOfType(pi, "pi-session-manager-window-binding").map(({ data }) => data.event),
+      ["ghostty_binding", "ghostty_binding_ended"],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("appends a privacy-limited history entry after the initial presence publish", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const appendObservations = [];
+  const pi = makePi({
+    onAppend: (type) => {
+      if (type === "pi-session-manager-presence") {
+        appendObservations.push({ exists: existsSync(record), state: readRecord(record).state });
+      }
+    },
+  });
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => "manager-session",
+    zellijPaneID: () => "terminal_11",
+    managedGhosttyIdentity: () => ({
+      appPID: 300,
+      windowID: "window-1",
+      terminalID: "terminal-1",
+      parentTTY: "/dev/ttys123",
+    }),
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+
+    assert.deepEqual(entriesOfType(pi, "pi-session-manager-presence"), [{
+      type: "pi-session-manager-presence",
+      data: {
+        event: "presence_published",
+        source: "pi-session-manager-presence",
+        sessionID: "session-id",
+        sessionFile: "/sessions/current.jsonl",
+        cwd: "/projects/forms",
+        state: "idle",
+        tty: "/dev/ttys007",
+        workspace: "manager-session",
+        zellijPaneID: "terminal_11",
+        ghosttyAppPID: 300,
+        ghosttyWindowID: "window-1",
+        ghosttyTerminalID: "terminal-1",
+        ghosttyParentTTY: "/dev/ttys123",
+      },
+    }]);
+    assert.deepEqual(appendObservations, [{ exists: true, state: "idle" }]);
+    const payload = entriesOfType(pi, "pi-session-manager-presence")[0].data;
+    assert.equal("updatedAt" in payload, false);
+    assert.equal("terminalTitle" in payload, false);
+    assert.equal("windowTitle" in payload, false);
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("appends every heartbeat and state publication with the current tmux route", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  const tmux = {
+    socketPath: "/private/tmp/tmux-test/socket",
+    serverPID: 456,
+    serverStartTime: "Tue Sep  8 12:00:01 2026",
+    sessionID: "$2",
+    windowID: "@3",
+    paneID: "%7",
+  };
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    tmuxRoute: () => tmux,
+    managedGhosttyIdentity: () => ({}),
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 5,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const heartbeatEntries = entriesOfType(pi, "pi-session-manager-presence");
+    assert.equal(heartbeatEntries.length >= 2, true);
+    assert.equal(heartbeatEntries.every(({ data }) => data.state === "idle"), true);
+    assert.equal(heartbeatEntries.every(({ data }) => data.tmux === tmux), true);
+
+    const beforeStateChange = heartbeatEntries.length;
+    pi.handlers.get("before_agent_start")({}, context({ idle: false }));
+    const stateEntries = entriesOfType(pi, "pi-session-manager-presence");
+    assert.equal(stateEntries.length, beforeStateChange + 1);
+    assert.equal(stateEntries.at(-1).data.state, "processing");
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("appends a stopped presence publication", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  registerPresenceExtension(pi, {
+    directory,
+    managedGhosttyIdentity: () => ({}),
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+    pi.handlers.get("session_shutdown")({}, context());
+
+    assert.deepEqual(
+      entriesOfType(pi, "pi-session-manager-presence").map(({ data }) => data.state),
+      ["idle", "stopped"],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("does not append presence or binding history when the initial atomic registry write fails", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const blockedDirectory = join(directory, "not-a-directory");
+  writeFileSync(blockedDirectory, "blocked\n");
+  const pi = makePi();
+  registerPresenceExtension(pi, {
+    directory: blockedDirectory,
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "window-1", terminalID: "terminal-1" }),
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    withPatchedConsoleError(() => {
+      pi.handlers.get("session_start")({}, context());
+      pi.handlers.get("session_shutdown")({}, context());
+    });
+    assert.deepEqual(pi.entries, []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("does not append stopped or binding-end history when the shutdown registry write fails", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  registerPresenceExtension(pi, {
+    directory,
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "window-1", terminalID: "terminal-1" }),
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+
+  try {
+    pi.handlers.get("session_start")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+    writeFileSync(directory, "blocked\n");
+    withPatchedConsoleError(() => {
+      pi.handlers.get("session_shutdown")({}, context());
+    });
+
+    assert.deepEqual(entriesOfType(pi, "pi-session-manager-presence").map(({ data }) => data.state), ["idle"]);
+    assert.deepEqual(
+      entriesOfType(pi, "pi-session-manager-window-binding").map(({ data }) => data.event),
+      ["ghostty_binding"],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test.skip("superseded: registerWindow republishes the frontmost Ghostty PID and exact surface tuple", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   const timestamps = [10_000, 10_001, 10_002];
@@ -811,7 +1196,7 @@ test("registerWindow republishes the frontmost Ghostty PID and exact surface tup
   }
 });
 
-test("registerWindow keeps two Zellij workspaces distinct despite a shared inherited Ghostty surface ID", () => {
+test.skip("superseded: registerWindow keeps two Zellij workspaces distinct despite a shared inherited Ghostty surface ID", () => {
   const firstDirectory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-first-"));
   const secondDirectory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-second-"));
   const previousSurfaceID = process.env.GHOSTTY_SURFACE_ID;
@@ -863,7 +1248,7 @@ test("registerWindow keeps two Zellij workspaces distinct despite a shared inher
   }
 });
 
-test("preserves registered Ghostty IDs on a Zellij heartbeat", () => {
+test.skip("superseded: preserves registered Ghostty IDs on a Zellij heartbeat", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   const bridge = new LiveSessionPresenceBridge({
@@ -890,7 +1275,7 @@ test("preserves registered Ghostty IDs on a Zellij heartbeat", () => {
   }
 });
 
-test("registerWindow does not guess from a workspace title without frontmost process identity", () => {
+test.skip("superseded: registerWindow does not guess from a workspace title without frontmost process identity", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   let titleLookupCount = 0;
   const bridge = new LiveSessionPresenceBridge({
@@ -917,7 +1302,7 @@ test("registerWindow does not guess from a workspace title without frontmost pro
   }
 });
 
-test("registerWindow falls back to the focused Ghostty terminal when env and title lookup fail", () => {
+test.skip("superseded: registerWindow falls back to the focused Ghostty terminal when env and title lookup fail", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   const bridge = new LiveSessionPresenceBridge({
@@ -947,7 +1332,7 @@ test("registerWindow falls back to the focused Ghostty terminal when env and tit
   }
 });
 
-test("registerWindow fails safely when Ghostty identity cannot be determined", () => {
+test.skip("superseded: registerWindow fails safely when Ghostty identity cannot be determined", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
   const record = join(directory, "session-id.json");
   const timestamps = [10_000, 10_001, 10_002, 10_003];
@@ -1047,8 +1432,8 @@ test("ignores advisory socket failures and keeps the authoritative presence file
       cwd: "/projects/forms",
       pid: 123,
       tty: null,
-      workspace: null,
-      zellijPaneID: null,
+      workspace: "manager-session",
+      zellijPaneID: "terminal_11",
       terminalTitle: null,
       ghosttyWindowID: null,
       ghosttyTerminalID: null,
@@ -1118,6 +1503,218 @@ test("encodes session IDs before using them as registry filenames", () => {
     assert.equal(existsSync(join(directory, "nested%2Fsession.json")), true);
   } finally {
     bridge.stop(context({ sessionID: "nested/session" }));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("publishes the ordinary bootstrap parent TTY with its exact Ghostty identity", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const previous = Object.fromEntries([
+    "PI_GHOSTTY_APP_PID", "PI_GHOSTTY_WINDOW_ID", "PI_GHOSTTY_TERMINAL_ID", "PI_GHOSTTY_PARENT_TTY",
+  ].map((name) => [name, process.env[name]]));
+  Object.assign(process.env, {
+    PI_GHOSTTY_APP_PID: "300",
+    PI_GHOSTTY_WINDOW_ID: "window-ordinary",
+    PI_GHOSTTY_TERMINAL_ID: "terminal-ordinary",
+    PI_GHOSTTY_PARENT_TTY: "/dev/ttys123",
+  });
+  const bridge = new LiveSessionPresenceBridge({ directory, pid: 123, terminalPath: () => "/dev/ttys007" });
+
+  try {
+    bridge.start(context());
+    const record = readRecord(join(directory, "session-id.json"));
+    assert.deepEqual(
+      [record.ghosttyAppPID, record.ghosttyWindowID, record.ghosttyTerminalID, record.ghosttyParentTTY],
+      [300, "window-ordinary", "terminal-ordinary", "/dev/ttys123"],
+    );
+  } finally {
+    bridge.stop(context());
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("publishes and republishes the exact bootstrap Ghostty identity", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys007",
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "window-1", terminalID: "terminal-1", parentTTY: "/dev/ttys007" }),
+  });
+
+  try {
+    bridge.start(context());
+    assert.deepEqual(
+      [readRecord(join(directory, "session-id.json")).ghosttyAppPID,
+       readRecord(join(directory, "session-id.json")).ghosttyWindowID,
+       readRecord(join(directory, "session-id.json")).ghosttyTerminalID],
+      [300, "window-1", "terminal-1"],
+    );
+    assert.equal(readRecord(join(directory, "session-id.json")).ghosttyParentTTY, "/dev/ttys007");
+    assert.equal(bridge.registerWindow(context()).ok, true);
+  } finally {
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("an incomplete bootstrap Ghostty identity is never published as an exact route", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys007",
+    managedGhosttyIdentity: () => ({ appPID: 300, terminalID: "terminal-1" }),
+  });
+
+  try {
+    bridge.start(context());
+    const record = readRecord(join(directory, "session-id.json"));
+    assert.equal("ghosttyAppPID" in record, false);
+    assert.equal(record.ghosttyWindowID, null);
+    assert.equal(record.ghosttyTerminalID, null);
+    assert.equal(bridge.registerWindow(context()).ok, false);
+  } finally {
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("resolveTmuxRoute uses the explicit socket and verifies the server incarnation", () => {
+  const calls = [];
+  const route = resolveTmuxRoute({
+    tmuxEnvironment: "/private/tmp/tmux-test/socket,456,0",
+    tmuxPaneID: "%7",
+    tmuxExecutable: "/custom/bin/tmux",
+    execFile: (command, args, options) => {
+      calls.push({ command, args, options });
+      if (command === "/custom/bin/tmux") return "456|$2|@3|%7\n";
+      if (command === "/bin/ps") return " Tue Sep  8 12:00:01 2026 \n";
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+
+  assert.deepEqual(route, {
+    socketPath: "/private/tmp/tmux-test/socket",
+    serverPID: 456,
+    serverStartTime: "Tue Sep  8 12:00:01 2026",
+    sessionID: "$2",
+    windowID: "@3",
+    paneID: "%7",
+  });
+  assert.deepEqual(calls[0].args.slice(0, 6), [
+    "-S",
+    "/private/tmp/tmux-test/socket",
+    "display-message",
+    "-p",
+    "-t",
+    "%7",
+  ]);
+  assert.equal(calls[0].args[6], "#{pid}|#{session_id}|#{window_id}|#{pane_id}");
+  assert.equal(calls[0].options.timeout > 0, true);
+  assert.deepEqual(calls[1].args, ["-p", "456", "-o", "lstart="]);
+  assert.equal(calls[1].options.env.LC_ALL, "C");
+});
+
+test("resolveTmuxRoute rejects a stale inherited TMUX server PID", () => {
+  const route = resolveTmuxRoute({
+    tmuxEnvironment: "/private/tmp/tmux-test/socket,456,0",
+    tmuxPaneID: "%7",
+    tmuxExecutable: "/custom/bin/tmux",
+    execFile: () => "999|$2|@3|%7\n",
+  });
+
+  assert.equal(route, undefined);
+});
+
+test("publishes the additive tmux route and suppresses stale Zellij routing", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const tmux = {
+    socketPath: "/private/tmp/tmux-test/socket",
+    serverPID: 456,
+    serverStartTime: "Tue Sep  8 12:00:01 2026",
+    sessionID: "$2",
+    windowID: "@3",
+    paneID: "%7",
+  };
+  const titleWrites = [];
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => "stale-zellij-workspace",
+    zellijPaneID: () => "stale-zellij-pane",
+    tmuxRoute: () => tmux,
+    writeTerminalTitleSequence: (value) => titleWrites.push(value),
+  });
+
+  try {
+    bridge.start(context());
+    const record = readRecord(join(directory, "session-id.json"));
+    assert.deepEqual(record.tmux, tmux);
+    assert.equal(record.workspace, null);
+    assert.equal(record.zellijPaneID, null);
+    assert.equal(record.terminalTitle, null);
+    assert.deepEqual(titleWrites, []);
+  } finally {
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a failed tmux query never falls back to stale inherited Zellij routing", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => "stale-zellij-workspace",
+    zellijPaneID: () => "stale-zellij-pane",
+    tmuxRuntime: () => true,
+    tmuxRoute: () => undefined,
+  });
+
+  try {
+    bridge.start(context());
+    const record = readRecord(join(directory, "session-id.json"));
+    assert.equal("tmux" in record, false);
+    assert.equal(record.workspace, null);
+    assert.equal(record.zellijPaneID, null);
+  } finally {
+    bridge.stop(context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("omits a tmux route when a later bounded identity query fails", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const tmux = {
+    socketPath: "/private/tmp/tmux-test/socket",
+    serverPID: 456,
+    serverStartTime: "Tue Sep  8 12:00:01 2026",
+    sessionID: "$2",
+    windowID: "@3",
+    paneID: "%7",
+  };
+  let queryCount = 0;
+  const bridge = new LiveSessionPresenceBridge({
+    directory,
+    pid: 123,
+    terminalPath: () => "/dev/ttys007",
+    tmuxRoute: () => ++queryCount === 1 ? tmux : undefined,
+  });
+
+  try {
+    bridge.start(context());
+    assert.deepEqual(readRecord(join(directory, "session-id.json")).tmux, tmux);
+    bridge.publish(context());
+    assert.equal("tmux" in readRecord(join(directory, "session-id.json")), false);
+  } finally {
+    bridge.stop(context());
     rmSync(directory, { recursive: true, force: true });
   }
 });

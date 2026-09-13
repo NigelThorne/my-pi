@@ -1,9 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 const sessionManagerDirectory = join(process.env.HOME ?? "/tmp", ".pi", "agent", "session-manager");
 const registryDirectory = join(sessionManagerDirectory, "live");
@@ -11,8 +11,19 @@ const launchDirectory = join(sessionManagerDirectory, "launches");
 const heartbeatIntervalMs = 15_000;
 const sessionMetadataRetryMs = 100;
 const ghosttyOsaScriptTimeoutMs = 2_000;
+const tmuxQueryTimeoutMs = 500;
+// Printable separators survive tmux's control-character sanitization without a UTF-8 locale.
+const tmuxRouteFormat = "#{pid}|#{session_id}|#{window_id}|#{pane_id}";
+let lastTmuxRouteDiagnostic: string | undefined;
 const indexerServiceProtocolVersion = 1;
 const indexerServiceSocketPathEnvironmentKey = "PI_SESSION_MANAGER_SERVICE_SOCKET_PATH";
+const presenceEntryType = "pi-session-manager-presence";
+const presencePublishedEvent = "presence_published";
+const presenceSource = "pi-session-manager-presence";
+const windowBindingEntryType = "pi-session-manager-window-binding";
+const windowBindingEvent = "ghostty_binding";
+const windowBindingEndedEvent = "ghostty_binding_ended";
+const windowBindingSource = "pi-session-manager-presence";
 
 function defaultIndexerServiceSocketPath(): string {
   const configured = process.env[indexerServiceSocketPathEnvironmentKey]?.trim();
@@ -27,20 +38,62 @@ type PendingPresencePublish = {
   state: PresenceState;
 };
 
-type GhosttySurfaceIdentity = {
+type CurrentGhosttySurfaceIdentity = {
   appPID?: number;
+  windowID?: string;
+  terminalID?: string;
+  parentTTY?: string;
+};
+
+type CompleteGhosttySurfaceIdentity = {
+  appPID: number;
   windowID: string;
   terminalID: string;
+  parentTTY?: string;
 };
 
-type GhosttySurface = GhosttySurfaceIdentity & {
-  name: string;
-  tty?: string;
+type ManagedGhosttyBinding = CompleteGhosttySurfaceIdentity & {
+  sessionID: string;
+  sessionFile: string;
+  cwd: string;
 };
 
-type CurrentGhosttySurfaceIdentity = {
-  terminalID?: string;
+type ManagedGhosttyBindingEvent = ManagedGhosttyBinding & {
+  event: typeof windowBindingEvent | typeof windowBindingEndedEvent;
+};
+
+export type TmuxPresenceRoute = {
+  socketPath: string;
+  serverPID: number;
+  serverStartTime: string;
+  sessionID: string;
+  windowID: string;
+  paneID: string;
+};
+
+type PresencePublication = {
+  sessionID: string;
+  sessionFile: string;
+  cwd: string;
+  state: PresenceState;
   tty?: string;
+  workspace?: string;
+  zellijPaneID?: string;
+  tmux?: TmuxPresenceRoute;
+  ghosttyAppPID?: number;
+  ghosttyWindowID?: string;
+  ghosttyTerminalID?: string;
+  ghosttyParentTTY?: string;
+};
+
+type ResolveTmuxRouteOptions = {
+  tmuxEnvironment?: string;
+  tmuxPaneID?: string;
+  tmuxExecutable?: string;
+  environment?: NodeJS.ProcessEnv;
+  isExecutable?: (path: string) => boolean;
+  onDiagnostic?: (message: string) => void;
+  execFile?: (command: string, args: string[], options: Record<string, unknown>) => string;
 };
 
 type RegisterWindowResult = {
@@ -59,19 +112,15 @@ type LiveSessionPresenceBridgeOptions = {
   terminalPath?: () => string | undefined;
   workspace?: () => string | undefined;
   zellijPaneID?: () => string | undefined;
-  isInteractive?: () => boolean;
+  tmuxRuntime?: () => boolean;
+  tmuxRoute?: () => TmuxPresenceRoute | undefined;
+  managedGhosttyIdentity?: () => CurrentGhosttySurfaceIdentity;
+  onManagedGhosttyBinding?: (binding: ManagedGhosttyBindingEvent) => void;
+  onPresencePublished?: (publication: PresencePublication) => void;
   writeTerminalTitleSequence?: (value: string) => boolean | void;
-  resolveGhosttySurface?: (title: string) => GhosttySurfaceIdentity | undefined;
-  resolveCurrentGhosttySurface?: (identity: CurrentGhosttySurfaceIdentity) => GhosttySurfaceIdentity | undefined;
-  resolveFocusedGhosttySurface?: () => GhosttySurfaceIdentity | undefined;
   sendAdvisoryPoke?: (stream: AdvisoryPokeStream) => void;
   heartbeatIntervalMs?: number;
   sessionMetadataRetryMs?: number;
-};
-
-type ResolveGhosttySurfaceOptions = {
-  isGhosttyRunning?: () => boolean;
-  listGhosttySurfaces?: () => GhosttySurface[];
 };
 
 function terminalPath(): string | undefined {
@@ -94,9 +143,91 @@ function zellijPaneID(): string | undefined {
   return process.env.ZELLIJ_PANE_ID;
 }
 
-function currentGhosttySurfaceID(): string | undefined {
-  const value = process.env.GHOSTTY_SURFACE_ID?.trim();
-  return value ? value : undefined;
+function tmuxRuntime(): boolean {
+  return Boolean(process.env.TMUX?.trim() && process.env.TMUX_PANE?.match(/^%[0-9]+$/));
+}
+
+export function resolveTmuxRoute(options: ResolveTmuxRouteOptions = {}): TmuxPresenceRoute | undefined {
+  const environment = options.environment ?? process.env;
+  const tmuxEnvironment = options.tmuxEnvironment ?? environment.TMUX;
+  const paneID = options.tmuxPaneID ?? environment.TMUX_PANE;
+  if (!tmuxEnvironment || !paneID?.match(/^%[0-9]+$/)) return undefined;
+
+  const environmentMatch = tmuxEnvironment.match(/^(.*),([1-9][0-9]*),[0-9]+$/);
+  if (!environmentMatch) return undefined;
+  const socketPath = environmentMatch[1];
+  const inheritedServerPID = Number(environmentMatch[2]);
+  if (!isAbsolute(socketPath) || !Number.isSafeInteger(inheritedServerPID)) return undefined;
+
+  const isExecutable = options.isExecutable ?? ((path: string) => {
+    try { accessSync(path, constants.X_OK); return true; } catch { return false; }
+  });
+  const candidates = [
+    join(environment.HOME ?? "/tmp", ".local/share/mise/shims/tmux"),
+    "/opt/homebrew/bin/tmux", "/usr/local/bin/tmux",
+  ];
+  const executable = options.tmuxExecutable ?? environment.PI_SESSION_MANAGER_TMUX_EXECUTABLE
+    ?? environment.PI_GHOSTTY_TMUX_EXECUTABLE ?? candidates.find(isExecutable) ?? "tmux";
+  const diagnostic = options.onDiagnostic ?? ((message: string) => {
+    if (message !== lastTmuxRouteDiagnostic) console.error(message);
+    lastTmuxRouteDiagnostic = message;
+  });
+  const execFile = options.execFile ?? ((command, args, execOptions) => execFileSync(command, args, execOptions as Parameters<typeof execFileSync>[2]) as string);
+  try {
+    const output = execFile(executable, ["-S", socketPath, "display-message", "-p", "-t", paneID, tmuxRouteFormat], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: tmuxQueryTimeoutMs,
+    }).trim();
+    const fields = output.split("|");
+    if (fields.length !== 4) {
+      diagnostic("Cannot identify detached tmux route: malformed pane response.");
+      return undefined;
+    }
+
+    const serverPID = Number(fields[0]);
+    const [sessionID, windowID, resolvedPaneID] = fields.slice(1);
+    if (serverPID !== inheritedServerPID
+        || !sessionID.match(/^\$[0-9]+$/)
+        || !windowID.match(/^@[0-9]+$/)
+        || resolvedPaneID !== paneID) {
+      diagnostic("Cannot identify detached tmux route: server or pane identity changed.");
+      return undefined;
+    }
+
+    const serverStartTime = execFile("/bin/ps", ["-p", String(serverPID), "-o", "lstart="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: tmuxQueryTimeoutMs,
+      env: { ...environment, LC_ALL: "C" },
+    }).trim();
+    if (!serverStartTime || /[\r\n]/.test(serverStartTime)) {
+      diagnostic("Cannot identify detached tmux route: server start identity unavailable.");
+      return undefined;
+    }
+    lastTmuxRouteDiagnostic = undefined;
+    return { socketPath, serverPID, serverStartTime, sessionID, windowID, paneID };
+  } catch (error) {
+    diagnostic(`Cannot query detached tmux route using ${executable}: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
+function managedGhosttyIdentity(): CurrentGhosttySurfaceIdentity {
+  const appPID = Number(process.env.PI_GHOSTTY_APP_PID);
+  const windowID = process.env.PI_GHOSTTY_WINDOW_ID?.trim();
+  const terminalID = process.env.PI_GHOSTTY_TERMINAL_ID?.trim();
+  const parentTTY = process.env.PI_GHOSTTY_PARENT_TTY?.trim();
+  return {
+    ...(Number.isInteger(appPID) && appPID > 0 ? { appPID } : {}),
+    ...(windowID ? { windowID } : {}),
+    ...(terminalID ? { terminalID } : {}),
+    ...(parentTTY?.match(/^\/dev\/tty[A-Za-z0-9_.-]+$/) ? { parentTTY } : {}),
+  };
+}
+
+function completeGhosttyIdentity(identity: CurrentGhosttySurfaceIdentity): identity is CompleteGhosttySurfaceIdentity {
+  return !!identity.appPID && !!identity.windowID && !!identity.terminalID;
 }
 
 function stripControlCharacters(value: string): string {
@@ -111,170 +242,10 @@ function terminalTitleSequence(value: string): string {
   return `\u001b]0;${value}\u0007`;
 }
 
-function isInteractive(): boolean {
-  return Boolean(process.stdout.isTTY);
-}
-
 function writeTerminalTitleSequence(value: string): boolean {
   if (!process.stdout.isTTY) return false;
   process.stdout.write(value);
   return true;
-}
-
-export function matchUniqueGhosttySurface(surfaces: GhosttySurface[], title: string): GhosttySurfaceIdentity | undefined {
-  const matches = surfaces.filter((surface) => surface.name === title || surface.name.startsWith(`${title} |`));
-  if (matches.length !== 1) return undefined;
-  return {
-    ...(matches[0].appPID ? { appPID: matches[0].appPID } : {}),
-    windowID: matches[0].windowID,
-    terminalID: matches[0].terminalID,
-  };
-}
-
-function ghosttyIsRunning(): boolean {
-  try {
-    execFileSync("/usr/bin/pgrep", ["-ix", "Ghostty"], {
-      encoding: "utf8",
-      stdio: ["ignore", "ignore", "ignore"],
-      timeout: ghosttyOsaScriptTimeoutMs,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function resolveGhosttySurface(title: string, options: ResolveGhosttySurfaceOptions = {}): GhosttySurfaceIdentity | undefined {
-  const isRunning = options.isGhosttyRunning ?? ghosttyIsRunning;
-  if (!isRunning()) return undefined;
-  const listSurfaces = options.listGhosttySurfaces ?? listGhosttySurfaces;
-  return matchUniqueGhosttySurface(listSurfaces(), title);
-}
-
-export function resolveCurrentGhosttySurface(identity: CurrentGhosttySurfaceIdentity = {}, options: ResolveGhosttySurfaceOptions = {}): GhosttySurfaceIdentity | undefined {
-  const isRunning = options.isGhosttyRunning ?? ghosttyIsRunning;
-  if (!isRunning()) return undefined;
-  const listSurfaces = options.listGhosttySurfaces ?? listGhosttySurfaces;
-  const surfaces = listSurfaces();
-  if (identity.terminalID) {
-    const matches = surfaces.filter((surface) => surface.terminalID === identity.terminalID);
-    if (matches.length === 1) return {
-      ...(matches[0].appPID ? { appPID: matches[0].appPID } : {}),
-      windowID: matches[0].windowID,
-      terminalID: matches[0].terminalID,
-    };
-  }
-  if (identity.tty) {
-    const matches = surfaces.filter((surface) => surface.tty === identity.tty);
-    if (matches.length === 1) return {
-      ...(matches[0].appPID ? { appPID: matches[0].appPID } : {}),
-      windowID: matches[0].windowID,
-      terminalID: matches[0].terminalID,
-    };
-  }
-  return undefined;
-}
-
-export function resolveFocusedGhosttySurface(options: Pick<ResolveGhosttySurfaceOptions, "isGhosttyRunning"> = {}): GhosttySurfaceIdentity | undefined {
-  const isRunning = options.isGhosttyRunning ?? ghosttyIsRunning;
-  if (!isRunning()) return undefined;
-  try {
-    const output = execFileSync(
-      "/usr/bin/osascript",
-      [
-        "-l",
-        "JavaScript",
-        "-e",
-        `ObjC.import("AppKit")
-ObjC.import("ScriptingBridge")
-function text(value) { return ObjC.unwrap(value) }
-function run() {
-  const running = $.NSWorkspace.sharedWorkspace.frontmostApplication
-  if (text(running.bundleIdentifier) !== "com.mitchellh.ghostty") throw new Error("Frontmost application is not Ghostty")
-  const pid = Number(text(running.processIdentifier))
-  const app = $.SBApplication.alloc.initWithProcessIdentifier(pid)
-  const frontWindow = app.valueForKey("frontWindow")
-  const selectedTab = frontWindow.valueForKey("selectedTab")
-  const terminal = selectedTab.valueForKey("focusedTerminal")
-  return [pid, text(frontWindow.valueForKey("id")), text(terminal.valueForKey("id"))].join("\\t")
-}`,
-      ],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: ghosttyOsaScriptTimeoutMs,
-      }
-    );
-    const fields = output.trim().split("\t");
-    const appPID = Number(fields[0]);
-    if (!Number.isInteger(appPID) || appPID <= 0 || !fields[1] || !fields[2]) return undefined;
-    return { appPID, windowID: fields[1], terminalID: fields[2] };
-  } catch {
-    return undefined;
-  }
-}
-
-function listGhosttySurfaces(): GhosttySurface[] {
-  try {
-    const output = execFileSync(
-      "/usr/bin/osascript",
-      [
-        "-l",
-        "JavaScript",
-        "-e",
-        `ObjC.import("AppKit")
-ObjC.import("ScriptingBridge")
-function text(value) { return ObjC.unwrap(value) }
-function run() {
-  const applications = $.NSWorkspace.sharedWorkspace.runningApplications
-  const output = []
-  for (let appIndex = 0; appIndex < Number(applications.count); appIndex++) {
-    const running = applications.objectAtIndex(appIndex)
-    if (text(running.bundleIdentifier) !== "com.mitchellh.ghostty") continue
-    const pid = Number(text(running.processIdentifier))
-    const app = $.SBApplication.alloc.initWithProcessIdentifier(pid)
-    const windows = app.elementArrayWithCode(0x47776e64)
-    for (let windowIndex = 0; windowIndex < Number(windows.count); windowIndex++) {
-      const window = windows.objectAtIndex(windowIndex)
-      const terminals = window.elementArrayWithCode(0x4774726d)
-      for (let terminalIndex = 0; terminalIndex < Number(terminals.count); terminalIndex++) {
-        const terminal = terminals.objectAtIndex(terminalIndex)
-        const name = String(text(terminal.valueForKey("name"))).replace(/[\\r\\n]/g, " ")
-        output.push([pid, text(window.valueForKey("id")), text(terminal.valueForKey("id")), name].join("\\t"))
-      }
-    }
-  }
-  return output.join("\\n")
-}`,
-      ],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: ghosttyOsaScriptTimeoutMs,
-      }
-    );
-    return parseGhosttySurfaces(output);
-  } catch {
-    return [];
-  }
-}
-
-export function parseGhosttySurfaces(output: string): GhosttySurface[] {
-  return output
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .flatMap((line) => {
-      const firstTab = line.indexOf("\t");
-      const secondTab = firstTab === -1 ? -1 : line.indexOf("\t", firstTab + 1);
-      const thirdTab = secondTab === -1 ? -1 : line.indexOf("\t", secondTab + 1);
-      if (firstTab === -1 || secondTab === -1 || thirdTab === -1) return [];
-      const appPID = Number(line.slice(0, firstTab));
-      const windowID = line.slice(firstTab + 1, secondTab);
-      const terminalID = line.slice(secondTab + 1, thirdTab);
-      const name = line.slice(thirdTab + 1);
-      if (!Number.isInteger(appPID) || appPID <= 0 || !windowID || !terminalID || !name) return [];
-      return [{ appPID, windowID, terminalID, name }];
-    });
 }
 
 export class LiveSessionPresenceBridge {
@@ -286,11 +257,12 @@ export class LiveSessionPresenceBridge {
   private readonly getTerminalPath: () => string | undefined;
   private readonly getWorkspace: () => string | undefined;
   private readonly getZellijPaneID: () => string | undefined;
-  private readonly isInteractive: () => boolean;
+  private readonly hasTmuxRuntime: () => boolean;
+  private readonly getTmuxRoute: () => TmuxPresenceRoute | undefined;
+  private readonly getManagedGhosttyIdentity: () => CurrentGhosttySurfaceIdentity;
+  private readonly onManagedGhosttyBinding: (binding: ManagedGhosttyBindingEvent) => void;
+  private readonly onPresencePublished: (publication: PresencePublication) => void;
   private readonly writeTerminalTitleSequence: (value: string) => boolean | void;
-  private readonly resolveGhosttySurface: (title: string) => GhosttySurfaceIdentity | undefined;
-  private readonly resolveCurrentGhosttySurface: (identity: CurrentGhosttySurfaceIdentity) => GhosttySurfaceIdentity | undefined;
-  private readonly resolveFocusedGhosttySurface: () => GhosttySurfaceIdentity | undefined;
   private readonly intervalMs: number;
   private readonly metadataRetryMs: number;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -300,10 +272,15 @@ export class LiveSessionPresenceBridge {
   private tty: string | undefined;
   private currentWorkspace: string | undefined;
   private currentZellijPaneID: string | undefined;
+  private currentTmuxRoute: TmuxPresenceRoute | undefined;
+  private inheritedGhosttyIdentity: CurrentGhosttySurfaceIdentity = {};
   private currentTerminalTitle: string | undefined;
   private currentGhosttyAppPID: number | undefined;
   private currentGhosttyWindowID: string | undefined;
   private currentGhosttyTerminalID: string | undefined;
+  private currentGhosttyParentTTY: string | undefined;
+  private activeManagedGhosttyBinding: ManagedGhosttyBinding | undefined;
+  private pendingManagedGhosttyBindings: ManagedGhosttyBindingEvent[] = [];
 
   constructor(options: LiveSessionPresenceBridgeOptions = {}) {
     this.directory = options.directory ?? registryDirectory;
@@ -315,11 +292,12 @@ export class LiveSessionPresenceBridge {
     this.getTerminalPath = options.terminalPath ?? terminalPath;
     this.getWorkspace = options.workspace ?? workspace;
     this.getZellijPaneID = options.zellijPaneID ?? zellijPaneID;
-    this.isInteractive = options.isInteractive ?? isInteractive;
+    this.hasTmuxRuntime = options.tmuxRuntime ?? tmuxRuntime;
+    this.getTmuxRoute = options.tmuxRoute ?? resolveTmuxRoute;
+    this.getManagedGhosttyIdentity = options.managedGhosttyIdentity ?? managedGhosttyIdentity;
+    this.onManagedGhosttyBinding = options.onManagedGhosttyBinding ?? (() => {});
+    this.onPresencePublished = options.onPresencePublished ?? (() => {});
     this.writeTerminalTitleSequence = options.writeTerminalTitleSequence ?? writeTerminalTitleSequence;
-    this.resolveGhosttySurface = options.resolveGhosttySurface ?? resolveGhosttySurface;
-    this.resolveCurrentGhosttySurface = options.resolveCurrentGhosttySurface ?? ((identity) => resolveCurrentGhosttySurface(identity));
-    this.resolveFocusedGhosttySurface = options.resolveFocusedGhosttySurface ?? (() => resolveFocusedGhosttySurface());
     this.intervalMs = options.heartbeatIntervalMs ?? heartbeatIntervalMs;
     this.metadataRetryMs = options.sessionMetadataRetryMs ?? sessionMetadataRetryMs;
   }
@@ -329,8 +307,6 @@ export class LiveSessionPresenceBridge {
     this.clearPublishRetry();
     this.removeCurrentRecord();
     this.tty = this.getTerminalPath();
-    this.currentWorkspace = this.getWorkspace();
-    this.currentZellijPaneID = this.getZellijPaneID();
     this.publish(ctx);
     this.heartbeat = setInterval(() => this.publish(ctx), this.intervalMs);
     this.heartbeat.unref?.();
@@ -345,16 +321,14 @@ export class LiveSessionPresenceBridge {
     }
 
     this.clearPublishRetry();
+    this.refreshMuxRoute();
     if (this.sessionID && this.sessionID !== sessionID) {
       this.removeCurrentRecord();
     }
     this.sessionID = sessionID;
+    this.refreshManagedGhosttyIdentity(sessionID, sessionFile, ctx.cwd, state === "stopped");
     this.syncTerminalTitle(sessionID);
-    const shouldResolveGhosttySurface = this.prepareGhosttySurfaceLookup();
     this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
-    if (shouldResolveGhosttySurface && this.syncGhosttySurface()) {
-      this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
-    }
   }
 
   publishSubagentLaunch(ctx: PresenceContext, result: unknown): void {
@@ -401,30 +375,21 @@ export class LiveSessionPresenceBridge {
     }
     this.sessionID = sessionID;
     this.tty = this.getTerminalPath();
-    this.currentWorkspace = this.getWorkspace();
-    this.currentZellijPaneID = this.getZellijPaneID();
+    this.refreshMuxRoute();
+    this.refreshManagedGhosttyIdentity(sessionID, sessionFile, ctx.cwd);
     this.syncTerminalTitle(sessionID);
 
     const state = ctx.isIdle() ? "idle" : "processing";
-    const surface = this.resolveFocusedGhosttySurface();
-    if (surface?.appPID && surface.appPID > 0 && surface.windowID && surface.terminalID) {
-      this.currentGhosttyAppPID = surface.appPID;
-      this.currentGhosttyWindowID = surface.windowID;
-      this.currentGhosttyTerminalID = surface.terminalID;
-      this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
+    this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
+    if (completeGhosttyIdentity(this.inheritedGhosttyIdentity)) {
       return {
         ok: true,
-        message: "Registered the current Ghostty window for this session.",
+        message: "Republished the Ghostty window established by the bootstrap.",
       };
     }
-
-    this.currentGhosttyAppPID = undefined;
-    this.currentGhosttyWindowID = undefined;
-    this.currentGhosttyTerminalID = undefined;
-    this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
     return {
       ok: false,
-      message: "Could not determine the current Ghostty window for this session. Run /register-window from the active Ghostty pane and try again.",
+      message: "The Ghostty bootstrap did not provide a complete window identity.",
     };
   }
 
@@ -465,13 +430,28 @@ export class LiveSessionPresenceBridge {
       this.sessionID = undefined;
     }
     this.currentTerminalTitle = undefined;
+    this.currentTmuxRoute = undefined;
     this.currentGhosttyAppPID = undefined;
     this.currentGhosttyWindowID = undefined;
     this.currentGhosttyTerminalID = undefined;
+    this.currentGhosttyParentTTY = undefined;
+    this.activeManagedGhosttyBinding = undefined;
+    this.pendingManagedGhosttyBindings = [];
+  }
+
+  private refreshMuxRoute(): void {
+    this.currentTmuxRoute = this.getTmuxRoute();
+    if (this.currentTmuxRoute || this.hasTmuxRuntime()) {
+      this.currentWorkspace = undefined;
+      this.currentZellijPaneID = undefined;
+      return;
+    }
+    this.currentWorkspace = this.getWorkspace();
+    this.currentZellijPaneID = this.getZellijPaneID();
   }
 
   private syncTerminalTitle(sessionID: string): void {
-    if (this.currentWorkspace || this.currentZellijPaneID) {
+    if (this.currentTmuxRoute || this.currentWorkspace || this.currentZellijPaneID) {
       this.currentTerminalTitle = undefined;
       return;
     }
@@ -488,31 +468,84 @@ export class LiveSessionPresenceBridge {
     }
   }
 
-  private prepareGhosttySurfaceLookup(): boolean {
-    if (this.currentWorkspace || this.currentZellijPaneID) return false;
-    if (!this.currentTerminalTitle || !this.isInteractive()) {
-      this.currentGhosttyAppPID = undefined;
-      this.currentGhosttyWindowID = undefined;
-      this.currentGhosttyTerminalID = undefined;
-      return false;
+  private refreshManagedGhosttyIdentity(sessionID: string, sessionFile: string, cwd: string, ending = false): void {
+    this.pendingManagedGhosttyBindings = [];
+    this.inheritedGhosttyIdentity = this.getManagedGhosttyIdentity();
+    this.applyGhosttyIdentity(this.inheritedGhosttyIdentity);
+
+    if (ending) {
+      if (this.activeManagedGhosttyBinding) {
+        this.pendingManagedGhosttyBindings.push({ event: windowBindingEndedEvent, ...this.activeManagedGhosttyBinding });
+      }
+      return;
     }
 
-    return !this.currentGhosttyWindowID || !this.currentGhosttyTerminalID;
+    if (!completeGhosttyIdentity(this.inheritedGhosttyIdentity)) {
+      if (this.activeManagedGhosttyBinding) {
+        this.pendingManagedGhosttyBindings.push({ event: windowBindingEndedEvent, ...this.activeManagedGhosttyBinding });
+      }
+      return;
+    }
+
+    const binding: ManagedGhosttyBinding = {
+      sessionID,
+      sessionFile,
+      cwd,
+      appPID: this.inheritedGhosttyIdentity.appPID,
+      windowID: this.inheritedGhosttyIdentity.windowID,
+      terminalID: this.inheritedGhosttyIdentity.terminalID,
+      ...(this.inheritedGhosttyIdentity.parentTTY ? { parentTTY: this.inheritedGhosttyIdentity.parentTTY } : {}),
+    };
+    if (this.activeManagedGhosttyBinding
+        && this.managedGhosttyBindingKey(binding) === this.managedGhosttyBindingKey(this.activeManagedGhosttyBinding)) return;
+    if (this.activeManagedGhosttyBinding) {
+      this.pendingManagedGhosttyBindings.push({ event: windowBindingEndedEvent, ...this.activeManagedGhosttyBinding });
+    }
+    this.pendingManagedGhosttyBindings.push({ event: windowBindingEvent, ...binding });
   }
 
-  private syncGhosttySurface(): boolean {
-    try {
-      const surface = this.resolveGhosttySurface(this.currentTerminalTitle!);
-      if (!surface?.windowID || !surface.terminalID) return false;
-      if (surface.appPID === this.currentGhosttyAppPID && surface.windowID === this.currentGhosttyWindowID && surface.terminalID === this.currentGhosttyTerminalID) return false;
-      this.currentGhosttyAppPID = surface.appPID;
-      this.currentGhosttyWindowID = surface.windowID;
-      this.currentGhosttyTerminalID = surface.terminalID;
-      return true;
-    } catch (error) {
-      console.error("pi-session-manager-presence: could not resolve Ghostty surface", error);
-      return false;
+  private managedGhosttyBindingKey(binding: ManagedGhosttyBinding): string {
+    return JSON.stringify([
+      binding.sessionID,
+      binding.sessionFile,
+      binding.appPID,
+      binding.windowID,
+      binding.terminalID,
+      binding.parentTTY ?? null,
+    ]);
+  }
+
+  private flushManagedGhosttyBindings(): void {
+    const pendingBindings = this.pendingManagedGhosttyBindings;
+    this.pendingManagedGhosttyBindings = [];
+    for (const binding of pendingBindings) {
+      try {
+        this.onManagedGhosttyBinding(binding);
+      } catch (error) {
+        console.error("pi-session-manager-presence: could not append managed Ghostty binding transition", error);
+        break;
+      }
+      if (binding.event === windowBindingEndedEvent) {
+        this.activeManagedGhosttyBinding = undefined;
+      } else {
+        const { event: _event, ...activeBinding } = binding;
+        this.activeManagedGhosttyBinding = activeBinding;
+      }
     }
+  }
+
+  private applyGhosttyIdentity(identity: CurrentGhosttySurfaceIdentity): void {
+    if (completeGhosttyIdentity(identity)) {
+      this.currentGhosttyAppPID = identity.appPID;
+      this.currentGhosttyWindowID = identity.windowID;
+      this.currentGhosttyTerminalID = identity.terminalID;
+      this.currentGhosttyParentTTY = identity.parentTTY;
+      return;
+    }
+    this.currentGhosttyAppPID = undefined;
+    this.currentGhosttyWindowID = undefined;
+    this.currentGhosttyTerminalID = undefined;
+    this.currentGhosttyParentTTY = undefined;
   }
 
   private writePresenceRecord(sessionID: string, sessionFile: string, cwd: string, state: PresenceState): void {
@@ -527,7 +560,9 @@ export class LiveSessionPresenceBridge {
       workspace: this.currentWorkspace ?? null,
       zellijPaneID: this.currentZellijPaneID ?? null,
       terminalTitle: this.currentTerminalTitle ?? null,
+      ...(this.currentTmuxRoute ? { tmux: this.currentTmuxRoute } : {}),
       ...(this.currentGhosttyAppPID ? { ghosttyAppPID: this.currentGhosttyAppPID } : {}),
+      ...(this.currentGhosttyParentTTY ? { ghosttyParentTTY: this.currentGhosttyParentTTY } : {}),
       ghosttyWindowID: this.currentGhosttyWindowID ?? null,
       ghosttyTerminalID: this.currentGhosttyTerminalID ?? null,
       state,
@@ -537,12 +572,36 @@ export class LiveSessionPresenceBridge {
       mkdirSync(this.directory, { recursive: true, mode: 0o700 });
       writeFileSync(temporary, JSON.stringify(entry) + "\n", { encoding: "utf8", mode: 0o600 });
       renameSync(temporary, destination);
+      this.flushManagedGhosttyBindings();
+      this.recordPresencePublicationSafely({
+        sessionID,
+        sessionFile,
+        cwd,
+        state,
+        ...(this.tty ? { tty: this.tty } : {}),
+        ...(this.currentWorkspace ? { workspace: this.currentWorkspace } : {}),
+        ...(this.currentZellijPaneID ? { zellijPaneID: this.currentZellijPaneID } : {}),
+        ...(this.currentTmuxRoute ? { tmux: this.currentTmuxRoute } : {}),
+        ...(this.currentGhosttyAppPID ? { ghosttyAppPID: this.currentGhosttyAppPID } : {}),
+        ...(this.currentGhosttyWindowID ? { ghosttyWindowID: this.currentGhosttyWindowID } : {}),
+        ...(this.currentGhosttyTerminalID ? { ghosttyTerminalID: this.currentGhosttyTerminalID } : {}),
+        ...(this.currentGhosttyParentTTY ? { ghosttyParentTTY: this.currentGhosttyParentTTY } : {}),
+      });
       this.sendAdvisoryPokeSafely("presence");
     } catch (error) {
+      this.pendingManagedGhosttyBindings = [];
       try {
         rmSync(temporary, { force: true });
       } catch {}
       console.error("pi-session-manager-presence: could not publish presence", error);
+    }
+  }
+
+  private recordPresencePublicationSafely(publication: PresencePublication): void {
+    try {
+      this.onPresencePublished(publication);
+    } catch (error) {
+      console.error("pi-session-manager-presence: could not append presence publication", error);
     }
   }
 
@@ -578,11 +637,33 @@ function sessionFileFrom(result: unknown): string | undefined {
   return typeof sessionFile === "string" ? sessionFile : undefined;
 }
 
-export default function (pi: ExtensionAPI) {
-  const bridge = new LiveSessionPresenceBridge();
+export default function (pi: ExtensionAPI, options: LiveSessionPresenceBridgeOptions = {}) {
+  const bridge = new LiveSessionPresenceBridge({
+    ...options,
+    onPresencePublished: (publication) => {
+      pi.appendEntry(presenceEntryType, {
+        event: presencePublishedEvent,
+        source: presenceSource,
+        ...publication,
+      });
+    },
+    onManagedGhosttyBinding: (binding) => {
+      pi.appendEntry(windowBindingEntryType, {
+        event: binding.event,
+        source: windowBindingSource,
+        sessionID: binding.sessionID,
+        sessionFile: binding.sessionFile,
+        cwd: binding.cwd,
+        ghosttyAppPID: binding.appPID,
+        ghosttyWindowID: binding.windowID,
+        ghosttyTerminalID: binding.terminalID,
+        ...(binding.parentTTY ? { ghosttyParentTTY: binding.parentTTY } : {}),
+      });
+    },
+  });
 
   pi.registerCommand("register-window", {
-    description: "Resolve and republish the current Ghostty window for this session",
+    description: "Republish the Ghostty window identity supplied by the bootstrap",
     handler: async (_args, ctx) => {
       const result = bridge.registerWindow(ctx);
       ctx.ui?.notify?.(result.message, result.ok ? "info" : "warning");

@@ -18,8 +18,9 @@ Some submodules also began on upstream repos and are now pointed at Nigel-owned 
 ## Structure
 
 ```
-AGENTS.md      # Global workflow preferences (copy to ~/.pi/agent/AGENTS.md)
-SETUP.md       # Step-by-step setup instructions for pi to follow
+AGENTS.md         # Instructions for changing this my-pi repository
+GLOBAL_AGENTS.md  # Global workflow preferences (copy to ~/.pi/agent/AGENTS.md)
+SETUP.md          # Step-by-step setup instructions for pi to follow
 extensions/    # Pi extensions (auto-loaded via settings)
 skills/        # Pi skills (auto-loaded via settings)
 prompts/       # Slash prompt templates (loaded via the `prompts` setting)

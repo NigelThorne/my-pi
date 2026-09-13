@@ -1,0 +1,17 @@
+{
+  "sessionId": "pi_01a060f6-801a-7654-a323-21b8907d0bca",
+  "lastPollAt": "2026-09-02T07:55:42.993Z",
+  "agentBusy": false,
+  "connected": false,
+  "phase": "inactive",
+  "pendingExpectation": false,
+  "lastSteerReason": "",
+  "lastTurnAt": "2026-09-02T07:51:27.988Z",
+  "lastUserInputAt": "2026-09-02T07:51:21.311Z",
+  "lastToolAt": "2026-09-02T07:45:37.408Z",
+  "lastTurnToolCalls": [],
+  "lastAssistantPreview": "No. It targets Ghostty by the registered process PID, then uses that process's exact window and terminal IDs. A second Ghostty process would be ignored unless the session registration explicitly point…",
+  "failedAttemptCount": 0,
+  "pendingInboxEventCount": 0,
+  "fallbackOutcome": ""
+}

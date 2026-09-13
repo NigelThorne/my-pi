@@ -56,6 +56,8 @@ run_pi() {
   local app_pid=${PI_GHOSTTY_APP_PID-}
   local parent_tty=${PI_GHOSTTY_PARENT_TTY-}
   local handshake_token=${PI_GHOSTTY_HANDSHAKE_TOKEN-}
+  local window_id=${PI_GHOSTTY_WINDOW_ID-}
+  local terminal_id=${PI_GHOSTTY_TERMINAL_ID-}
   local argument layout
   local -a pi_arguments
 
@@ -81,16 +83,18 @@ run_pi() {
     done
   fi
   layout+="
-    close_on_exit true
+    close_on_exit false
   }
 }
 env {
   PI_GHOSTTY_APP_PID $(kdl_quote "$app_pid")
   PI_GHOSTTY_PARENT_TTY $(kdl_quote "$parent_tty")
   PI_GHOSTTY_HANDSHAKE_TOKEN $(kdl_quote "$handshake_token")
+  PI_GHOSTTY_WINDOW_ID $(kdl_quote "$window_id")
+  PI_GHOSTTY_TERMINAL_ID $(kdl_quote "$terminal_id")
 }"
 
-  exec "$zellij_executable" --session "$workspace" --layout-string "$layout"
+  exec "$zellij_executable" --layout-string "$layout"
 }
 
 bounded_zellij() {
