@@ -105,14 +105,21 @@ Get a free Brave Search API key at https://api-dashboard.search.brave.com/regist
 
 ### pi-session-manager-presence.ts
 
-Publishes exact local presence for every persisted Pi session to `~/.pi/agent/session-manager/live/`. Pi Session Manager uses the atomically written heartbeat to match the session ID and JSONL file path, then displays **Processing** or **Idle** without guessing from CWD.
+Publishes exact local presence for every persisted Pi session to `~/.pi/agent/session-manager/live/` in two files:
 
-The extension is loaded automatically because `~/.pi/agent/settings.json` includes `~/.my-pi/extensions`. Run `/reload` or restart already-open Pi sessions to activate it. A clean shutdown publishes a short-lived `stopped` record so the manager does not mistake a recently written JSONL for a live session; stale records are pruned after five minutes.
+- `<sessionID>.json` is the atomically replaced current-state snapshot that Pi Session Manager already reads.
+- `<sessionID>.jsonl` is an append-only history. Each publication adds the same full JSON record, including `pid`, `state`, and `updatedAt` in Unix milliseconds, followed by a newline. Session IDs are URI-encoded in both filenames.
+
+Publications include startup, each 15-second heartbeat, activity updates, explicit registration, and graceful shutdown. The extension never truncates or deletes the JSONL history on session switches or restarts. It does not backfill older snapshots or rotate the log. Both files are created with owner-only permissions. They are not a transaction: history is appended before snapshot replacement, and a failed history append is logged without blocking the snapshot update. The files record presence; they do not lock a session against duplicate Pi processes.
+
+Pi Session Manager continues to use the snapshot to match the session ID and Pi session JSONL path, then displays **Processing** or **Idle** without guessing from CWD. No PSM reader changes are required yet.
+
+The extension is loaded automatically because `~/.pi/agent/settings.json` includes `~/.my-pi/extensions`. Run `/reload` or restart already-open Pi sessions to activate it. A clean shutdown publishes a `stopped` record. PSM may prune stale JSON snapshots; the JSONL history remains.
 
 Test it with:
 
 ```bash
-node --test ~/.my-pi/extensions/pi-session-manager-presence.test.mjs
+node --test ~/.my-pi/extensions/pi-session-manager-presence{,-history}.test.mjs
 ```
 
 ### todo.ts
@@ -169,6 +176,10 @@ Starts an independent successor Pi session in a Zellij pane with a compact, gene
 The command summarizes the active effective context (including any existing compaction summaries) into a self-contained handoff checkpoint, then starts a fresh Pi session with that checkpoint, the project configuration, and the shared working directory. It must use `pass_the_buck_take_over` once it is ready to own the work. Until then it can call `pass_the_buck_ask` to ask the predecessor questions; the predecessor replies with `pass_the_buck_reply`.
 
 After takeover, the predecessor runs `/retro` when at least 20% (and 16K tokens) of its context window remains; otherwise it exits gracefully. The relay is durable at `~/.pi/agent/pass-the-buck/`, allowing the sessions to survive a reload while the handoff is in progress.
+
+Handoff tools are hidden outside an active handoff. The successor sees only `pass_the_buck_ask` and `pass_the_buck_take_over`; the predecessor sees only `pass_the_buck_reply`. Explicit tool exclusions remain respected, and takeover hides the tools again.
+
+These tools are not a subagent-to-parent messaging channel. An ordinary child that is blocked, with no independent work left, should summarize the blocker and exact question, then call `subagent_done` with that summary to return control to its parent. `subagent_steer` only sends instructions from parent to child.
 
 ### mycelium-watchdog/
 

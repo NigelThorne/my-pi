@@ -6,6 +6,8 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
 const RELAY_ENV = "PI_PASS_THE_BUCK_HANDOFF_ID";
+const HANDOFF_TOOLS = new Set(["pass_the_buck_ask", "pass_the_buck_reply", "pass_the_buck_take_over"]);
+const SUBAGENT_GUIDANCE = "The pass_the_buck_* tools are for replacement sessions launched by /pass-the-buck, not ordinary subagent-to-parent communication. subagent_steer is parent-to-child only. If blocked and no independent work remains, send a concise blocker summary with the exact question or decision needed, then immediately call subagent_done with that summary to return control to your parent. Do not claim the task succeeded when reporting a blocker.";
 const MIN_RETRO_TOKENS = 16_384;
 const DEFAULT_POLL_INTERVAL_MS = 750;
 const SUMMARIZER_TIMEOUT_MS = 120_000;
@@ -326,7 +328,11 @@ function successorProtocol(relayRoot: string, ctx: any): HandoffProtocol | undef
   if (!handoffId) return undefined;
   const protocol = readProtocol(relayRoot, handoffId);
   if (!protocol || protocol.status === "taken-over") return undefined;
-  return protocol.successor.sessionId === ctx.sessionManager.getSessionId() ? protocol : undefined;
+  if (protocol.successor.sessionId !== ctx.sessionManager.getSessionId()) return undefined;
+  // The predecessor still needs to consume this event before marking the
+  // protocol complete and retiring, but the successor's handoff is finished.
+  if (readEvents(relayRoot, handoffId).some((event) => event.kind === "takeover")) return undefined;
+  return protocol;
 }
 
 function predecessorProtocol(relayRoot: string, ctx: any): HandoffProtocol | undefined {
@@ -380,6 +386,29 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const consumedEventIds = new Set<string>();
   let poller: NodeJS.Timeout | undefined;
+  let configuredHandoffTools: Set<string> | undefined;
+
+  const syncToolVisibility = (ctx: any, activate = false) => {
+    const current: string[] = pi.getActiveTools();
+    // Capture the caller's tool selection before hiding our tools. Never
+    // activate something excluded by --tools, --exclude-tools, or --no-tools.
+    configuredHandoffTools ??= new Set(current.filter((name) => HANDOFF_TOOLS.has(name)));
+    const eligible = new Set<string>();
+    if (successorProtocol(relayRoot, ctx)) {
+      eligible.add("pass_the_buck_ask");
+      eligible.add("pass_the_buck_take_over");
+    }
+    if (predecessorProtocol(relayRoot, ctx)) eligible.add("pass_the_buck_reply");
+    const next = current.filter((name) => !HANDOFF_TOOLS.has(name) || eligible.has(name));
+    if (activate) {
+      for (const name of eligible) {
+        if (configuredHandoffTools.has(name) && !next.includes(name)) next.push(name);
+      }
+    }
+    if (next.length !== current.length || next.some((name, index) => name !== current[index])) {
+      pi.setActiveTools(next);
+    }
+  };
 
   const remember = (eventId: string) => {
     consumedEventIds.add(eventId);
@@ -392,11 +421,15 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   };
 
   const startPredecessorPolling = (ctx: any) => {
+    syncToolVisibility(ctx, true);
     if (!predecessorProtocol(relayRoot, ctx)) return;
     stopPolling();
     poller = setInterval(() => {
       const active = predecessorProtocol(relayRoot, ctx);
-      if (!active) return stopPolling();
+      if (!active) {
+        syncToolVisibility(ctx);
+        return stopPolling();
+      }
       for (const event of readEvents(relayRoot, active.handoffId)) {
         if (consumedEventIds.has(event.id)) continue;
         remember(event.id);
@@ -409,6 +442,7 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
         if (event.kind === "takeover") {
           stopPolling();
           writeProtocol(relayRoot, { ...active, status: "taken-over" });
+          syncToolVisibility(ctx);
           ctx.ui.notify(`Successor accepted the handoff: ${event.summary ?? "(no summary)"}`, "info");
           if (enoughContextForRetro(ctx)) {
             pi.sendUserMessage("/retro", { deliverAs: "followUp", expandPromptTemplates: true });
@@ -502,14 +536,14 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   pi.registerTool({
     name: "pass_the_buck_ask",
     label: "Ask Predecessor",
-    description: "Ask the predecessor Pi session a focused handoff question and wait for its answer.",
+    description: "Only for the active replacement session launched by /pass-the-buck: ask its predecessor a handoff question and wait for the answer. Not a subagent-to-parent messaging tool.",
     parameters: objectSchema({
       question: { type: "string", minLength: 1 },
       timeout_ms: { type: "integer", minimum: 1, maximum: 300_000 },
     }, ["question"]),
     async execute(toolCallId: string, params: { question: string; timeout_ms?: number }, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
       const protocol = successorProtocol(relayRoot, ctx);
-      if (!protocol) throw new Error("This tool is only available to the active pass-the-buck successor session.");
+      if (!protocol) throw new Error("This tool requires an active pass-the-buck successor handoff. Being a subagent does not create one; this is not a parent permission setting. " + SUBAGENT_GUIDANCE);
       appendEvent(relayRoot, protocol.handoffId, { kind: "question", requestId: toolCallId, text: params.question });
       const answer = await waitForAnswer(relayRoot, protocol.handoffId, toolCallId, params.timeout_ms ?? 120_000, signal);
       return {
@@ -522,7 +556,7 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   pi.registerTool({
     name: "pass_the_buck_reply",
     label: "Reply to Successor",
-    description: "Reply to a specific handoff question from the successor Pi session.",
+    description: "Only for the predecessor in an active /pass-the-buck handoff: reply to a question from its replacement session. Not ordinary parent-to-subagent messaging.",
     parameters: objectSchema({
       request_id: { type: "string", minLength: 1 },
       answer: { type: "string", minLength: 1 },
@@ -542,12 +576,13 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
   pi.registerTool({
     name: "pass_the_buck_take_over",
     label: "Accept Handoff",
-    description: "Confirm that you have enough context and now own the handed-off task.",
+    description: "Only for the active replacement session launched by /pass-the-buck: accept ownership of the task so the predecessor can retire. Not a subagent assignment acknowledgement.",
     parameters: objectSchema({ summary: { type: "string", minLength: 1 } }, ["summary"]),
     async execute(_toolCallId: string, params: { summary: string }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
       const protocol = successorProtocol(relayRoot, ctx);
-      if (!protocol) throw new Error("This tool is only available to the active pass-the-buck successor session.");
+      if (!protocol) throw new Error("This tool requires an active pass-the-buck successor handoff. Being a subagent does not create one; this is not a parent permission setting. " + SUBAGENT_GUIDANCE);
       appendEvent(relayRoot, protocol.handoffId, { kind: "takeover", summary: params.summary });
+      syncToolVisibility(ctx);
       return { content: [{ type: "text", text: "Takeover acknowledged; the predecessor will now retire." }], details: { handoffId: protocol.handoffId } };
     },
   });
@@ -559,6 +594,16 @@ export function createPassTheBuckExtension(pi: ExtensionAPI | any, options: Exte
       }
     }
     startPredecessorPolling(ctx);
+  });
+
+  pi.on("turn_start", async (_event: unknown, ctx: any) => syncToolVisibility(ctx));
+
+  pi.on("before_agent_start", async (event: { systemPrompt: string }, ctx: any) => {
+    syncToolVisibility(ctx);
+    if (process.env.PI_SUBAGENT_NAME && pi.getActiveTools().includes("subagent_done")
+      && !successorProtocol(relayRoot, ctx) && !predecessorProtocol(relayRoot, ctx)) {
+      return { systemPrompt: `${event.systemPrompt}\n\n${SUBAGENT_GUIDANCE}` };
+    }
   });
 
   pi.on("session_shutdown", async () => stopPolling());

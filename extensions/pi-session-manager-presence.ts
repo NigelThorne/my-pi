@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { accessSync, constants, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, constants, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { isAbsolute, join } from "node:path";
 
@@ -570,7 +570,15 @@ export class LiveSessionPresenceBridge {
     };
     try {
       mkdirSync(this.directory, { recursive: true, mode: 0o700 });
-      writeFileSync(temporary, JSON.stringify(entry) + "\n", { encoding: "utf8", mode: 0o600 });
+      const line = JSON.stringify(entry) + "\n";
+      // Preserve every publication across session switches and process restarts.
+      // The compatibility snapshot and history are independent, not a transaction.
+      try {
+        appendFileSync(join(this.directory, `${encodeURIComponent(sessionID)}.jsonl`), line, { encoding: "utf8", mode: 0o600 });
+      } catch (error) {
+        console.error("pi-session-manager-presence: could not append presence history", error);
+      }
+      writeFileSync(temporary, line, { encoding: "utf8", mode: 0o600 });
       renameSync(temporary, destination);
       this.flushManagedGhosttyBindings();
       this.recordPresencePublicationSafely({

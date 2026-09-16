@@ -13,6 +13,7 @@ function makePi() {
   const handlers = new Map();
   const sentMessages = [];
   const entries = [];
+  let activeTools = ["read", "bash", "subagent_done"];
 
   return {
     commands,
@@ -21,7 +22,12 @@ function makePi() {
     sentMessages,
     entries,
     registerCommand(name, definition) { commands.set(name, definition); },
-    registerTool(definition) { tools.set(definition.name, definition); },
+    registerTool(definition) {
+      tools.set(definition.name, definition);
+      activeTools.push(definition.name);
+    },
+    getActiveTools() { return [...activeTools]; },
+    setActiveTools(names) { activeTools = [...names]; },
     on(name, handler) { handlers.set(name, handler); },
     sendUserMessage(message, options) { sentMessages.push({ message, options }); },
     appendEntry(type, data) { entries.push({ type, data }); },
@@ -66,8 +72,157 @@ async function setup(t, options = {}) {
     pollIntervalMs: 5,
     ...options,
   });
+  t.after(() => pi.handlers.get("session_shutdown")({}, makeContext()));
   return { mod, pi, relayRoot };
 }
+
+function setHandoffEnv(t, value) {
+  const previous = process.env.PI_PASS_THE_BUCK_HANDOFF_ID;
+  if (value === undefined) delete process.env.PI_PASS_THE_BUCK_HANDOFF_ID;
+  else process.env.PI_PASS_THE_BUCK_HANDOFF_ID = value;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_PASS_THE_BUCK_HANDOFF_ID;
+    else process.env.PI_PASS_THE_BUCK_HANDOFF_ID = previous;
+  });
+}
+
+function seedHandoff(mod, relayRoot, extra = {}) {
+  return mod.__test__.writeProtocol(relayRoot, {
+    handoffId: "handoff-test",
+    predecessor: { sessionId: "previous", sessionFile: "/tmp/previous.jsonl" },
+    successor: { sessionId: "successor" },
+    cwd: "/work/project",
+    request: "continue",
+    summary: "Checkpoint.",
+    status: "pending",
+    ...extra,
+  });
+}
+
+const ordinaryTools = ["read", "bash", "subagent_done"];
+
+test("ordinary sessions hide all handoff tools without changing unrelated tools", async (t) => {
+  setHandoffEnv(t, undefined);
+  const { pi } = await setup(t);
+  await pi.handlers.get("session_start")({}, makeContext());
+  assert.deepEqual(pi.getActiveTools(), ordinaryTools);
+});
+
+test("only the exact pending successor sees ask and takeover, including after reload", async (t) => {
+  setHandoffEnv(t, "handoff-test");
+  const { pi, mod, relayRoot } = await setup(t);
+  seedHandoff(mod, relayRoot);
+  await pi.handlers.get("session_start")({ reason: "reload" }, makeContext({ sessionId: "successor", sessionFile: "/tmp/successor.jsonl" }));
+  assert.deepEqual(pi.getActiveTools(), [...ordinaryTools, "pass_the_buck_ask", "pass_the_buck_take_over"]);
+});
+
+for (const state of ["wrong-session", "missing-protocol", "completed", "takeover-recorded"]) {
+  test(`handoff tools stay hidden for ${state}`, async (t) => {
+    setHandoffEnv(t, "handoff-test");
+    const { pi, mod, relayRoot } = await setup(t);
+    if (state !== "missing-protocol") seedHandoff(mod, relayRoot, state === "completed" ? { status: "taken-over" } : {});
+    if (state === "takeover-recorded") mod.__test__.appendEvent(relayRoot, "handoff-test", { kind: "takeover", summary: "Accepted" });
+    await pi.handlers.get("session_start")({}, makeContext({ sessionId: state === "wrong-session" ? "ordinary-child" : "successor", sessionFile: "/tmp/child.jsonl" }));
+    assert.deepEqual(pi.getActiveTools(), ordinaryTools);
+  });
+}
+
+test("launch enables only predecessor reply and takeover polling removes it", async (t) => {
+  setHandoffEnv(t, undefined);
+  const { pi, mod, relayRoot } = await setup(t, { launchSuccessor() {} });
+  const ctx = makeContext();
+  await pi.handlers.get("session_start")({}, ctx);
+  assert.deepEqual(pi.getActiveTools(), ordinaryTools);
+  await pi.commands.get("pass-the-buck").handler("continue", ctx);
+  assert.deepEqual(pi.getActiveTools(), [...ordinaryTools, "pass_the_buck_reply"]);
+  mod.__test__.appendEvent(relayRoot, "handoff-test", { kind: "takeover", summary: "Accepted" });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(pi.getActiveTools(), ordinaryTools);
+});
+
+test("pending predecessor regains reply on reload", async (t) => {
+  setHandoffEnv(t, undefined);
+  const { pi, mod, relayRoot } = await setup(t);
+  seedHandoff(mod, relayRoot);
+  await pi.handlers.get("session_start")({ reason: "reload" }, makeContext());
+  assert.deepEqual(pi.getActiveTools(), [...ordinaryTools, "pass_the_buck_reply"]);
+});
+
+test("takeover immediately hides successor tools without consuming predecessor retirement", async (t) => {
+  setHandoffEnv(t, "handoff-test");
+  const { pi, mod, relayRoot } = await setup(t);
+  seedHandoff(mod, relayRoot);
+  const ctx = makeContext({ sessionId: "successor", sessionFile: "/tmp/successor.jsonl" });
+  await pi.handlers.get("session_start")({}, ctx);
+  await pi.tools.get("pass_the_buck_take_over").execute("accept", { summary: "Ready" }, undefined, undefined, ctx);
+  assert.deepEqual(pi.getActiveTools(), ordinaryTools);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(relayRoot, "handoff-test", "protocol.json"))).status, "pending");
+  await assert.rejects(pi.tools.get("pass_the_buck_ask").execute("late", { question: "Too late", timeout_ms: 1 }, undefined, undefined, ctx), /active pass-the-buck successor/);
+});
+
+test("visibility respects tools disabled by the caller", async (t) => {
+  setHandoffEnv(t, undefined);
+  const { pi } = await setup(t, { launchSuccessor() {} });
+  pi.setActiveTools(["read"]);
+  const ctx = makeContext();
+  await pi.handlers.get("session_start")({}, ctx);
+  await pi.commands.get("pass-the-buck").handler("continue", ctx);
+  assert.deepEqual(pi.getActiveTools(), ["read"]);
+});
+
+test("turn refresh removes a handoff that completed externally", async (t) => {
+  setHandoffEnv(t, "handoff-test");
+  const { pi, mod, relayRoot } = await setup(t);
+  seedHandoff(mod, relayRoot);
+  const ctx = makeContext({ sessionId: "successor", sessionFile: "/tmp/successor.jsonl" });
+  await pi.handlers.get("session_start")({}, ctx);
+  seedHandoff(mod, relayRoot, { status: "taken-over" });
+  assert.equal(typeof pi.handlers.get("turn_start"), "function");
+  await pi.handlers.get("turn_start")({}, ctx);
+  assert.deepEqual(pi.getActiveTools(), ordinaryTools);
+});
+
+test("turn refresh preserves unrelated tool changes and manual handoff disabling", async (t) => {
+  setHandoffEnv(t, "handoff-test");
+  const { pi, mod, relayRoot } = await setup(t);
+  seedHandoff(mod, relayRoot);
+  const ctx = makeContext({ sessionId: "successor", sessionFile: "/tmp/successor.jsonl" });
+  await pi.handlers.get("session_start")({}, ctx);
+  pi.setActiveTools(["read", "new_tool", "pass_the_buck_take_over"]);
+  await pi.handlers.get("turn_start")({}, ctx);
+  assert.deepEqual(pi.getActiveTools(), ["read", "new_tool", "pass_the_buck_take_over"]);
+});
+
+test("stale ordinary-child calls explain the prerequisite without writing relay events", async (t) => {
+  setHandoffEnv(t, undefined);
+  const { pi, relayRoot } = await setup(t);
+  await assert.rejects(pi.tools.get("pass_the_buck_ask").execute("ask", { question: "Parent?" }, undefined, undefined, makeContext()), /not a parent permission setting/);
+  assert.deepEqual(fs.readdirSync(relayRoot), []);
+});
+
+test("ordinary subagents get accurate parent communication guidance", async (t) => {
+  setHandoffEnv(t, undefined);
+  const previous = process.env.PI_SUBAGENT_NAME;
+  process.env.PI_SUBAGENT_NAME = "worker";
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_SUBAGENT_NAME;
+    else process.env.PI_SUBAGENT_NAME = previous;
+  });
+  const { pi } = await setup(t);
+  assert.equal(typeof pi.handlers.get("before_agent_start"), "function");
+  const result = await pi.handlers.get("before_agent_start")({ systemPrompt: "Existing instructions" }, makeContext());
+  assert.match(result.systemPrompt, /^Existing instructions/);
+  assert.match(result.systemPrompt, /subagent_done/);
+  assert.match(result.systemPrompt, /blocker/);
+  assert.match(result.systemPrompt, /pass_the_buck_.*not|not.*pass_the_buck_/);
+  assert.match(result.systemPrompt, /subagent_steer.*parent-to-child/);
+
+  pi.setActiveTools(["read"]);
+  assert.equal(await pi.handlers.get("before_agent_start")({ systemPrompt: "Base" }, makeContext()), undefined);
+  delete process.env.PI_SUBAGENT_NAME;
+  pi.setActiveTools(ordinaryTools);
+  assert.equal(await pi.handlers.get("before_agent_start")({ systemPrompt: "Base" }, makeContext()), undefined);
+});
 
 test("/pass-the-buck launches a fresh successor with a generated handoff checkpoint", async (t) => {
   const launches = [];
@@ -274,7 +429,10 @@ test("successor can ask the predecessor a question and receive its reply", async
   });
   const original = process.env.PI_PASS_THE_BUCK_HANDOFF_ID;
   process.env.PI_PASS_THE_BUCK_HANDOFF_ID = "handoff-test";
-  t.after(() => { process.env.PI_PASS_THE_BUCK_HANDOFF_ID = original; });
+  t.after(() => {
+    if (original === undefined) delete process.env.PI_PASS_THE_BUCK_HANDOFF_ID;
+    else process.env.PI_PASS_THE_BUCK_HANDOFF_ID = original;
+  });
 
   setTimeout(() => {
     mod.__test__.appendEvent(relayRoot, "handoff-test", {
