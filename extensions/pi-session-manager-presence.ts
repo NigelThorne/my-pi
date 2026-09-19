@@ -365,7 +365,7 @@ export class LiveSessionPresenceBridge {
     if (!sessionFile || !sessionID) {
       return {
         ok: false,
-        message: "Could not register this window yet because the session metadata is not available.",
+        message: "Could not register this window yet because the session metadata is not available. No registration payload was sent.",
       };
     }
 
@@ -380,16 +380,24 @@ export class LiveSessionPresenceBridge {
     this.syncTerminalTitle(sessionID);
 
     const state = ctx.isIdle() ? "idle" : "processing";
-    this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
-    if (completeGhosttyIdentity(this.inheritedGhosttyIdentity)) {
-      return {
-        ok: true,
-        message: "Republished the Ghostty window established by the bootstrap.",
-      };
-    }
+    const publication = this.writePresenceRecord(sessionID, sessionFile, ctx.cwd, state);
+    const complete = completeGhosttyIdentity(this.inheritedGhosttyIdentity);
+    const summary = !publication.written
+      ? "Could not publish the window registration."
+      : complete
+        ? "Republished the Ghostty window established by the bootstrap."
+        : "The Ghostty bootstrap did not provide a complete window identity.";
     return {
-      ok: false,
-      message: "The Ghostty bootstrap did not provide a complete window identity.",
+      ok: publication.written && complete,
+      message: [
+        summary,
+        `Registry write: ${publication.written ? "succeeded" : "FAILED"}`,
+        `Registry file: ${JSON.stringify(publication.destination)}`,
+        // Format the bytes used for this write, not a second identity query.
+        publication.serialized === undefined
+          ? "Payload unavailable."
+          : `Payload (null = unavailable; omitted fields are not sent):\n${JSON.stringify(JSON.parse(publication.serialized), null, 2)}`,
+      ].join("\n"),
     };
   }
 
@@ -548,7 +556,7 @@ export class LiveSessionPresenceBridge {
     this.currentGhosttyParentTTY = undefined;
   }
 
-  private writePresenceRecord(sessionID: string, sessionFile: string, cwd: string, state: PresenceState): void {
+  private writePresenceRecord(sessionID: string, sessionFile: string, cwd: string, state: PresenceState): { written: boolean; destination: string; serialized?: string } {
     const destination = this.recordPath(sessionID);
     const temporary = `${destination}.${this.pid}.${randomUUID()}.tmp`;
     const entry = {
@@ -568,9 +576,12 @@ export class LiveSessionPresenceBridge {
       state,
       updatedAt: this.now(),
     };
+    let written = false;
+    let serialized: string | undefined;
     try {
+      serialized = JSON.stringify(entry);
       mkdirSync(this.directory, { recursive: true, mode: 0o700 });
-      const line = JSON.stringify(entry) + "\n";
+      const line = serialized + "\n";
       // Preserve every publication across session switches and process restarts.
       // The compatibility snapshot and history are independent, not a transaction.
       try {
@@ -580,6 +591,7 @@ export class LiveSessionPresenceBridge {
       }
       writeFileSync(temporary, line, { encoding: "utf8", mode: 0o600 });
       renameSync(temporary, destination);
+      written = true;
       this.flushManagedGhosttyBindings();
       this.recordPresencePublicationSafely({
         sessionID,
@@ -603,6 +615,7 @@ export class LiveSessionPresenceBridge {
       } catch {}
       console.error("pi-session-manager-presence: could not publish presence", error);
     }
+    return { written, destination, serialized };
   }
 
   private recordPresencePublicationSafely(publication: PresencePublication): void {
@@ -671,7 +684,7 @@ export default function (pi: ExtensionAPI, options: LiveSessionPresenceBridgeOpt
   });
 
   pi.registerCommand("register-window", {
-    description: "Republish the Ghostty window identity supplied by the bootstrap",
+    description: "Republish window identity and show the exact registry path, window, pane, TTY, and payload",
     handler: async (_args, ctx) => {
       const result = bridge.registerWindow(ctx);
       ctx.ui?.notify?.(result.message, result.ok ? "info" : "warning");

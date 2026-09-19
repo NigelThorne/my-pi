@@ -103,10 +103,12 @@ Pi Session Manager continues to use the snapshot to match the session ID and Pi 
 
 The extension is loaded automatically because `~/.pi/agent/settings.json` includes `~/.my-pi/extensions`. Run `/reload` or restart already-open Pi sessions to activate it. A clean shutdown publishes a `stopped` record. PSM may prune stale JSON snapshots; the JSONL history remains.
 
+`/register-window` republishes the current identity and displays the registry file, write result, and exact JSON payload. This includes the TTY, Ghostty window/terminal/parent TTY, tmux route, and Zellij settings when present. `null` means unavailable; omitted fields were not sent. A failed write shows the attempted payload without claiming registration succeeded.
+
 Test it with:
 
 ```bash
-node --test ~/.my-pi/extensions/pi-session-manager-presence{,-history}.test.mjs
+node --test ~/.my-pi/extensions/pi-session-manager-presence{,-history}.test.mjs ~/.my-pi/extensions/pi-session-manager-register-window.test.mjs
 ```
 
 ### todo.ts
