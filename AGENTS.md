@@ -60,7 +60,7 @@ Personal Mycelium behavior layer on top of `mycelium-pi`. It does not register M
 
 ### Web Tools (`webfetch`, `websearch`)
 
-Search the web and fetch page content. These are the **preferred** tools for web access — use them instead of brave-search.
+Use these tools for public web search and page retrieval without opening a browser.
 
 - `websearch` — Search the web via Exa AI (no API key required). Use for discovery, finding docs, current events.
 - `webfetch` — Fetch a URL and return content as markdown, text, or HTML. Use for retrieving specific pages.
@@ -69,21 +69,11 @@ Use `websearch` when you need to find information (discovery), and `webfetch` wh
 
 ## Skills
 
-### Web Search (`/skill:brave-search`)
+### Browser automation
 
-**Legacy** — prefer the `websearch` and `webfetch` tools above. Only use brave-search as a fallback if the web tools are unavailable.
+For JavaScript-rendered pages and local UI tests, use an isolated headless browser through the project's test framework or the `webapp-testing` skill when installed. Read the skill and check dependencies before use.
 
-Search the web and extract page content via Brave Search API.
-
-```bash
-search.js "query"                    # Basic search
-search.js "query" --content          # Include page content
-content.js https://example.com       # Extract page content
-```
-
-### Browser Automation (`/skill:browser-tools`)
-
-Full browser automation via Chrome DevTools Protocol. Use for interacting with web pages, testing UIs, or scraping dynamic content. Read the skill for setup and usage.
+Use `chrome-cdp` only when Nigel explicitly approves inspecting or interacting with his existing Chrome session. Target a specific tab by ID. Do not use his personal browser for routine automated QA. External writes still require approval, even from a headless browser.
 
 ### Clipboard (`clipboard_read`, `clipboard_write`)
 
@@ -117,9 +107,9 @@ TypeScript-aware code intelligence. Falls back to ripgrep for non-TS/JS files.
 - `ast_rename` — Rename a symbol across the codebase (applies edits)
 - `ast_symbols` — List all symbols in a file (functions, classes, types, etc.)
 
-### Image Generation (`generate_image`)
+### Image generation (`gemini-image` skill)
 
-Generate images via Google Antigravity (gemini-3-pro-image). Requires `/login` for google-antigravity.
+Use the `gemini-image` skill for Gemini image generation through the saved website login. Its helper stores credentials in macOS Keychain and returns PNG files for inspection with `read`. The old Antigravity `generate_image` tool is disabled. Browser access for authentication requires explicit permission; ordinary generation uses Keychain without opening Chrome.
 
 ### Persistent Memory (`memory_save`, `memory_search`, `memory_list`, `memory_remove`)
 
@@ -193,6 +183,10 @@ When using the `edit` tool:
 - “Found multiple occurrences” → make `oldText` more unique by including more surrounding exact context, or set `expectedOccurrences` to the exact count if you really intend to replace every occurrence.
 - “Must match exactly including whitespace” → re-read the file and copy the exact indentation, spacing, and newlines.
 
+## Credentials
+
+Use macOS Keychain for credentials in repository-owned helpers. Never commit keys, OAuth tokens, cookies, or full environment dumps, even when a variable is named `DONT_USE__...`. Do not print credential values or pass them in command-line arguments. Follow [SECURITY.md](SECURITY.md).
+
 ## Git Workflow
 
 ### Trunk-based development for this repository
@@ -232,7 +226,7 @@ Fix all Blockers in one pass, then recheck only those findings. Do not start ano
 - Use **superpowers skills** when available (brainstorming, writing-plans, subagent-driven-development, branch-driven-development, test-driven-development, etc.), subject to the proportional quality-gates policy above.
 - Track multi-step work with **todo tools** — create todos at the start of complex tasks
 - Use **subagents** when their expected value exceeds their coordination cost. Do not require a scout, planner, or reviewer for micro work.
-- Search the web with **`websearch`** and fetch pages with **`webfetch`** — prefer these over brave-search
+- Search the web with **`websearch`** and fetch known URLs with **`webfetch`**. Use an isolated headless browser only when rendering or interaction is needed.
 - Use **`/btw`** for side conversations — ask questions or plan ahead without interrupting the main task
 - **Never make an execution promise without a live executor.** Before saying “I’ll do/check/monitor X” or implying work will continue after the response, first start a shell command, subagent, or scheduled job with an observable handle. A waiting marker or intention is not execution; a final response ends the turn.
 - Use **`unslop`** before writing or editing prose for people, including responses, docs, plans, release notes, pull requests, and issues. Do not apply it to source code, tool output, or verbatim quotations.

@@ -54,8 +54,20 @@ An `unconfirmed` draft may have been delivered or have an active sender. Inspect
 
 Direct `post` supports these inputs, `--dry-run`, and `--idempotency-key`. Without a key, repeated posts can duplicate delivery. Dry-run checks access, not send permission, and cannot combine with a key.
 
+## Notify selected people
+
+Mentions are silent by default. Add `--mention-users @cath` to `post` or `prepare` to allow only Cath to ping:
+
+```bash
+dwm prepare '<channel-or-thread-url>' --message "Nigel's PA: @nigel likes @cath" --mention-users @cath
+```
+
+Only selected exact Discord usernames become `<@USER_ID>` in the text. `@nigel` stays plain text. Use comma-separated usernames or user IDs for multiple people. Display names and server nicknames are not supported. With IDs, include `<@USER_ID>` in the message yourself. The flag does not insert missing mentions. Unknown or ambiguous usernames stop the send.
+
+Approve the resolved content and `mention_users` ID list in the preview before sending. Drafts freeze both; `send` cannot override them. Reusing an idempotency key with a different mention list fails. Roles, `@everyone`, `@here`, reply pings and unlisted users remain suppressed. Recipient notification settings still apply.
+
 ## Safety and errors
 
-Supports server text/announcement channels and existing threads, not DMs, forum parents or thread creation. Mentions never ping; archived/locked threads are rejected. The bot needs View Channel plus Send Messages or Send Messages in Threads. Private threads require access.
+Supports server text/announcement channels and existing threads, not DMs, forum parents or thread creation. Archived/locked threads are rejected. The bot needs View Channel plus Send Messages or Send Messages in Threads. Private threads require access.
 
 Posting workflows emit structured output. Exit codes: `0` success, `1` service/state error, `2` invalid arguments. Never print or request the bot token. Deployment, permission changes and service restarts require separate approval.

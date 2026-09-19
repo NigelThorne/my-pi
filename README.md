@@ -76,28 +76,15 @@ cd ~/.my-pi/extensions/web-tools && npm install
 cd ~/.my-pi/extensions/code-ast && npm install
 ```
 
-#### 5. Skills (browser + legacy search)
+#### 5. Web and browser access
 
-Install dependencies for the bundled skills:
+Use `websearch` to find public pages and `webfetch` to read known URLs. Neither requires an API key or a browser.
 
-```bash
-cd ~/.my-pi/skills/browser-tools && npm install
-cd ~/.my-pi/skills/brave-search && npm install   # optional — legacy fallback
-```
+For JavaScript rendering and local UI tests, use the project's browser test framework or the separately installed `webapp-testing` skill with an isolated headless browser. Check its dependencies before use.
 
-#### 6. Environment Variables (optional)
+The `chrome-cdp` package is configured in `settings.example.json`. It accesses an existing Chrome session and requires Node.js 22+, Chrome remote debugging, and Nigel's explicit approval. It is not the default for automated QA.
 
-Only needed if you use the legacy brave-search skill. Add to your shell profile (`~/.profile`, `~/.bashrc`, or `~/.zshrc`):
-
-```bash
-export BRAVE_API_KEY="your-brave-api-key"
-```
-
-Get a free Brave Search API key at https://api-dashboard.search.brave.com/register (requires a "Free AI" subscription).
-
-> **Note:** The `websearch` and `webfetch` tools (in `extensions/web-tools/`) require **no API keys** and are the preferred way to search the web and fetch pages.
-
-#### 7. Superpowers Skills
+#### 6. Superpowers Skills
 
 [Superpowers](https://github.com/obra/superpowers) skills are bundled in `skills/` alongside the other skills. No separate installation needed.
 
@@ -241,7 +228,7 @@ Features:
 
 ### web-tools/
 
-Web search and content fetching — the **preferred** tools for web access (replaces brave-search for most use cases).
+Default tools for public web search and page retrieval without a browser.
 
 **Tools:** `webfetch`, `websearch`
 
@@ -251,16 +238,13 @@ Features:
 - Custom TUI rendering for both tools
 - Output truncation to prevent context overflow
 
-### antigravity-image-gen.ts
+### Gemini image generation
 
-Image generation via Google Antigravity (gemini-3-pro-image, imagen-3).
+The [gemini-image skill](skills/gemini-image/SKILL.md) generates PNG images through the saved Gemini website login using [HanaokaYuzu/Gemini-API](https://github.com/HanaokaYuzu/Gemini-API). It requires macOS and `uv`, stores credentials in macOS Keychain, and uses the account's website quota rather than a paid API key.
 
-**Tool:** `generate_image`
+Run `/skill:gemini-image` or ask Pi to generate an image. The skill's helper supports explicit browser authentication, generation, local login status, and logout. Generation does not access Chrome. Authentication requires permission and an explicit Gemini tab and account.
 
-Features:
-- Generates images from text prompts
-- Configurable aspect ratio, model, and save location
-- Requires Google OAuth: run `/login` for google-antigravity
+The old `generate_image` extension is preserved at `disabled/antigravity-image-gen.ts`, outside extension discovery. Run `/reload` in existing Pi sessions to load the new skill and remove the old tool. To restore the old provider, move that file back to `extensions/` and reload.
 
 ### memory.ts
 
@@ -278,12 +262,10 @@ Features:
 
 ## Skills
 
-Bundled in `skills/` (browser/search from [badlogic/pi-skills](https://github.com/badlogic/pi-skills), workflow skills from [obra/superpowers](https://github.com/obra/superpowers)).
+Bundled in `skills/`, including workflow skills from [obra/superpowers](https://github.com/obra/superpowers). Browser access is described in the setup section above.
 
 | Skill | Description | Requires |
 |-------|-------------|----------|
-| **brave-search** | Web search + page content extraction (legacy — prefer `websearch`/`webfetch` tools) | `BRAVE_API_KEY` |
-| **browser-tools** | Browser automation via Chrome DevTools Protocol | Chrome |
 | **brainstorming** | Explores intent, requirements and design before creative work | — |
 | **dispatching-parallel-agents** | Run 2+ independent tasks in parallel | — |
 | **executing-plans** | Execute implementation plans with review checkpoints | — |
@@ -298,18 +280,6 @@ Bundled in `skills/` (browser/search from [badlogic/pi-skills](https://github.co
 | **verification-before-completion** | Run verification commands before claiming done | — |
 | **writing-plans** | Create multi-step implementation plans from specs | — |
 | **writing-skills** | Create, edit, and verify skills | — |
-
-### browser-tools
-
-Tools: `browser-start.js`, `browser-nav.js`, `browser-eval.js`, `browser-screenshot.js`, `browser-resize.js`, `browser-pick.js`, `browser-cookies.js`, `browser-content.js`
-
-`browser-resize.js` supports named device presets (`iphone`, `iphone-se`, `iphone-pro-max`, `ipad`, `ipad-pro`, `android`, `tablet`, `laptop`, `desktop`), custom `WxH` with `--dpr` and `--mobile` flags, and `reset` to clear overrides.
-
-### brave-search
-
-Tools: `search.js`, `content.js`
-
-Usage: `/skill:brave-search "query"` or just ask naturally.
 
 ### superpowers
 

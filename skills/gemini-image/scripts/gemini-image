@@ -1,0 +1,11 @@
+#!/bin/sh
+# Local commands never install packages or contact the network.
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" "$ROOT/scripts/gemini_image.py" "$@"
+fi
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$ROOT/scripts/gemini_image.py" "$@"
+fi
+printf '%s\n' 'error: "python_missing"' 'help: "Install Python 3.12 with mise, then run uv sync --locked --project <skill-directory>."'
+exit 1

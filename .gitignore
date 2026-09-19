@@ -3,3 +3,13 @@ node_modules/
 *.js
 *.d.ts
 *.map
+
+# Local credentials and accidental environment dumps. See SECURITY.md.
+.env
+.env.*
+!.env.example
+/e1
+/e1s
+/e2
+/e2s
+*.env-dump

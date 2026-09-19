@@ -34,47 +34,17 @@ Install dependencies for the web-tools extension (preferred for web search and f
 cd ~/.my-pi/extensions/web-tools && npm install
 ```
 
-## 4. Skills
+## 4. Isolated browser testing
 
-Install dependencies for the bundled skills:
+Use the project's existing browser test framework for JavaScript-rendered pages and local UI verification. The optional `webapp-testing` skill provides a Python Playwright workflow when installed separately. Read its setup instructions and check dependencies before use.
 
-```bash
-cd ~/.my-pi/skills/browser-tools && npm install
-cd ~/.my-pi/skills/brave-search && npm install   # optional legacy fallback
-```
+Run automated checks in an isolated headless browser, not Nigel's personal Chrome. Do not install another browser driver for ordinary public page retrieval; use `webfetch`.
 
-### Browser (for browser-tools)
+## 5. Existing Chrome access
 
-**macOS:** Chrome is usually already installed. If not: `brew install --cask google-chrome`
+The `chrome-cdp` package is included in `settings.example.json`. It requires Node.js 22+ and Chrome remote debugging. Read `/skill:chrome-cdp` for setup and commands.
 
-**Linux:**
-```bash
-# Option 1: Chrome (recommended — works without snap)
-wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-sudo dpkg -i /tmp/chrome.deb
-sudo apt-get install -f -y
-
-# Option 2: Chromium (if snap is available)
-sudo snap install chromium
-```
-
-The `browser-start.js` script auto-detects Chrome or Chromium on both macOS and Linux. On headless Linux (no DISPLAY), it runs in headless mode automatically.
-
-## 5. Environment Variables (optional)
-
-Only needed if using the legacy brave-search skill. Check if `BRAVE_API_KEY` is set:
-
-```bash
-echo $BRAVE_API_KEY
-```
-
-If not set and the user wants brave-search, ask for their key and add it to `~/.profile`:
-
-```bash
-export BRAVE_API_KEY="<key>"
-```
-
-> **Note:** The `websearch` and `webfetch` tools require no API keys — they are the preferred web access tools.
+Only inspect or interact with Nigel's existing browser after explicit approval. Use the target tab's ID, and do not enable debugging or open pages as an unsolicited setup check.
 
 ## 6. Superpowers
 
