@@ -1,0 +1,19 @@
+# Lowercase ASCII names, unsigned integer text, mandatory LF after each row.
+# Empty input is an empty object after transformation. Duplicate names last-win.
+root document
+document <- rows:row+ / empty:!.
+row <- name:[a-z]+ "=" digits:[0-9]+ "\n"
+
+@test "empty" { input: "" expect: { empty: "" } }
+@test "one" {
+  input: "apples=12\n"
+  expect: { rows: [{ name: "apples", digits: "12" }] }
+}
+@test "many" {
+  input: "apples=12\npears=3\n"
+  expect: { rows: [{ name: "apples", digits: "12" }, { name: "pears", digits: "3" }] }
+}
+@test "missing value" { input: "apples=\n" reject: true }
+@test "missing newline" { input: "apples=12" reject: true }
+@test "negative" { input: "apples=-1\n" reject: true }
+@test "trailing junk" { input: "apples=12\n!" reject: true }

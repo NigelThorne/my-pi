@@ -1,0 +1,5 @@
+# Children become entries before the rows container becomes an object.
+# int() accepts leading zeros but rejects values outside signed 64-bit range.
+{ name: simple(name), digits: simple(digits) } => { key: name, value: int(digits) }
+{ rows: subtree(entries) } => from_entries(entries)
+{ empty: "" } => {}
