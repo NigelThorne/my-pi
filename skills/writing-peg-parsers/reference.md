@@ -60,7 +60,7 @@ Children transform before parents. The first matching rule applies once; unmatch
 
 For nested containers, keep tagged element/entry wrappers until the container reduces. Otherwise a scalar, singleton array and nested array can become indistinguishable. The checkout's `examples/json.peg` and `examples/json.pegtx` demonstrate this pattern.
 
-A repeated binding can match equal opening/closing tag names, but unequal names merely leave a node unmatched. This is **not** semantic validation. Add a separate validator if mismatches must fail.
+A repeated binding can match equal opening/closing tag names, but unequal names merely leave a node unmatched. Use `require_equal(open, close)` in the output expression when mismatches must fail. The XML example checks tag equality during transformation, so parse-only success is not validation.
 
 | Output helper | Contract |
 | --- | --- |
@@ -73,6 +73,7 @@ A repeated binding can match equal opening/closing tag names, but unequal names 
 | `number(text)` | Validate JSON numeric syntax, preserving exact spelling/precision |
 | `pluck(xs, "key")` | Extract that field from every object; missing keys fail |
 | `from_entries(xs)` | Exact `{key: string, value: any}` entries to object; duplicate keys last-wins |
+| `require_equal(a, b)` | Return `a` when deeply equal to `b`; otherwise runtime error |
 
 Output objects and argument lists require commas. No arbitrary host-language code or unlisted helpers. Conversion errors fail rather than silently coercing. Number-literal matching is representation-sensitive; integer, float and preserved numeric-token values differ.
 
@@ -85,5 +86,6 @@ Use the checkout's examples as references, not standards-compliance claims:
 - `examples/email.*`: captures and string reconstruction, not full RFC email validation.
 - `examples/json.*`: wrapper-preserving nested containers, exact numbers, escapes and surrogate pairs.
 - `examples/csv.*`: quoting, multiline cells, empty fields, no automatic type conversion.
+- `examples/xml.*`: nested/mixed elements, named entities and tag-name validation, without attributes, namespaces or DTDs.
 
 Files/stdin are bounded to 16 MiB; grammar source to 4 MiB. Parsing has depth/work limits and no packrat memoization. Test representative larger documents rather than promising linear performance.
