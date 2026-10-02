@@ -32,6 +32,40 @@ Use `@test(subject) "label" { input: "Hello" expect: "Hello" }` to test a named 
 
 Tests accept JSON-style values, bare object keys and optional commas. Each needs a string `input` and exactly one `expect` or `reject: true`. Use `\n` inside input strings. Numeric literals use JSON syntax, not `01` or `1.`.
 
+## Minimal boundary guards
+
+Field-scanning guards prevent a greedy matcher from consuming a boundary. They are not required merely because another expression follows a field.
+
+```peg
+# Natural stops: no lookahead needed.
+identifier <- [A-Za-z0-9-]+
+quantity <- quantity:[0-9]+
+line_text <- line_text:[^\r\n]+
+subject <- subject:[^`]+
+quoted_subject <- "`" subject "`"
+```
+
+Before adding `!boundary`, check whether the field matcher can consume the boundary's first byte. If it cannot, omit the guard. `[0-9]+` cannot consume `&shipmentId=`; `[A-Za-z0-9-]+` cannot consume `?ref_=`; `[^\r\n]+` cannot consume a newline. Guarding these with the whole suffix is redundant. Excluding an ASCII closing delimiter directly in a class is usually simpler than lookahead.
+
+Partial overlap matters. `[A-Za-z -]+` can consume the leading space of `" – "`, even though it cannot consume the en dash. Keep a short guard here:
+
+```peg
+product_end <- " – "
+product <- product:(!product_end [A-Za-z -])+
+product_line <- product product_end "delivered"
+```
+
+Use the shortest boundary that is unambiguous in the supported format. Never generate `!(entire remaining email)` or duplicate long URLs, boilerplate, tracking values or invisible padding inside a guard. Factoring a whole suffix into a named rule does not solve the problem. Keep continuation matching in separate rules. If the short delimiter can occur inside a field, define escaping or choose a sufficient local boundary and test the ambiguous case rather than guessing.
+
+For UTF-8 delimiters, use a short literal guard when needed. Classes are byte-oriented: `[^’]` excludes each encoded byte, not just that Unicode character, and can reject unrelated text. Prefer:
+
+```peg
+quoted_title <- "‘" title "’"
+title <- title:(!"’" [^\r\n])+
+```
+
+Test that each field ends correctly, permitted delimiter-like content survives, and changes to unrelated following text do not change the capture. Include rejection cases for missing terminators. `guards.peg` in this skill directory contains runnable examples. Do not replace exact whitespace with broader helpers unless the input contract allows that change.
+
 ## Capture shapes
 
 | Grammar expression | Input | Tree |

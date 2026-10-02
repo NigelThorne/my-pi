@@ -1,0 +1,53 @@
+# Field boundaries, not copies of the rest of the document.
+root document
+document <- "Subject: `" subject "`\nBody: " [a-z]+
+subject <- subject:[^`]+
+
+identifier <- [A-Za-z0-9-]+
+order_id <- order_id:identifier
+package_index <- package_index:[0-9]+
+order_line <- order_id "&packageIndex=" package_index
+quantity <- quantity:[0-9]+
+quantity_line <- quantity "\nNext line"
+line_text <- line_text:[^\r\n]+
+line <- line_text "\n"
+
+# The leading space of the delimiter is in the field's class: guard needed.
+product_end <- " – "
+product <- product:(!product_end [A-Za-z -])+
+product_line <- product product_end "delivered"
+
+# Curly quotes are UTF-8 literals, not single-byte class members.
+quoted_title <- "‘" title "’"
+title <- title:(!"’" [^\r\n])+
+
+@test "original continuation" {
+  input: "Subject: `Hello`\nBody: fixed"
+  expect: { subject: "Hello" }
+}
+@test "changed continuation does not affect capture" {
+  input: "Subject: `Hello`\nBody: changed"
+  expect: { subject: "Hello" }
+}
+@test "missing closing delimiter" { input: "Subject: `Hello\nBody: fixed" reject: true }
+@test "unescaped delimiter is outside subject syntax" { input: "Subject: `a`b`\nBody: fixed" reject: true }
+@test(order_line) "identifier and digits stop naturally" {
+  input: "ABC-123&packageIndex=2"
+  expect: { order_id: "ABC-123", package_index: "2" }
+}
+@test(quantity_line) "digits stop before newline" { input: "12\nNext line" expect: { quantity: "12" } }
+@test(line) "line matcher stops before newline" { input: "hello world\n" expect: { line_text: "hello world" } }
+@test(product_line) "guard preserves delimiter leading space" {
+  input: "banana bread – delivered"
+  expect: { product: "banana bread" }
+}
+@test(product_line) "ordinary hyphen is content" {
+  input: "ready-made bread – delivered"
+  expect: { product: "ready-made bread" }
+}
+@test(product_line) "missing product delimiter" { input: "banana delivered" reject: true }
+@test(quoted_title) "Unicode content survives literal guard" {
+  input: "‘café – tea’"
+  expect: { title: "café – tea" }
+}
+@test(quoted_title) "missing Unicode closing delimiter" { input: "‘café" reject: true }

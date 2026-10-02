@@ -56,6 +56,12 @@ printf 'apples=12\npears=3\n' |
 
 For arbitrary projects, save grammars and transforms in that project, not in this skill directory.
 
+## Guard only real overlaps
+
+Do not automatically guard every capture. First choose a field matcher that stops naturally at its delimiter. Digits stop before `&`; identifiers stop before `?`; a line matcher stops before a newline.
+
+Add negative lookahead only if the field matcher can consume the delimiter or its leading bytes. Use the shortest unambiguous boundary, never a copy of the remaining document. Keep the following structure outside the capture. See [guard examples](reference.md#minimal-boundary-guards) and the tested [guards.peg](guards.peg).
+
 ## Diagnose failures
 
 ```sh
