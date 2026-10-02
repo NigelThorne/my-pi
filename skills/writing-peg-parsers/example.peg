@@ -4,6 +4,16 @@ root document
 document <- rows:row+ / empty:!.
 row <- name:[a-z]+ "=" digits:[0-9]+ "\n"
 
+# Test the helper without the document's rows wrapper.
+@test(row) "single row helper" {
+  input: "apples=12\n"
+  expect: { name: "apples", digits: "12" }
+}
+@test(row) "helper rejects a second row" {
+  input: "apples=12\npears=3\n"
+  reject: true
+}
+
 @test "empty" { input: "" expect: { empty: "" } }
 @test "one" {
   input: "apples=12\n"

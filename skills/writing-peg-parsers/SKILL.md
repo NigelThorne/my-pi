@@ -22,7 +22,7 @@ Read the checkout's `README.md` and `SPEC.md` for the full contract. If neither 
 ## Author and check
 
 1. Define accepted syntax and final JSON shape. Decide whitespace, empty input, duplicate keys, encoding and numeric precision explicitly.
-2. Write valid and rejection `@test` cases. `expect` asserts the **raw capture tree**, not transformed output.
+2. Write valid and rejection tests. Use `@test(rule) "name" { ... }` for a helper, or plain `@test "name" { ... }` for the root. Both consume the whole test input. `expect` asserts the **raw capture tree**, not transformed output.
 3. Implement one rule at a time. Run `peg_test grammar.peg` and inspect actual trees with `peg_parse` before designing transforms.
 4. Add `.pegtx` rules. Test final JSON separately, including zero, one and multiple items, nested containers and malformed input.
 
