@@ -28,6 +28,8 @@ Unlike regex backtracking, `( "a" / "ab" ) "c"` rejects `abc`. The successful `"
 
 No left recursion. Write expression chains as `term (operator term)*`, not `expr operator term / term`. Never repeat a nullable expression, including optional expressions and lookahead. Resource limits are errors, not ordinary rejection-test successes.
 
+Use `@test(subject) "label" { input: "Hello" expect: "Hello" }` to test a named rule directly. Plain `@test "label"` uses the root. Both require the entire input to match. Forward rule references work; unknown test targets fail when loading tests, but parse-only mode skips target resolution. Keep a root declaration even when all tests select helpers.
+
 Tests accept JSON-style values, bare object keys and optional commas. Each needs a string `input` and exactly one `expect` or `reject: true`. Use `\n` inside input strings. Numeric literals use JSON syntax, not `01` or `1.`.
 
 ## Capture shapes
