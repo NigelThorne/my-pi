@@ -2,7 +2,13 @@
 # Empty input is an empty object after transformation. Duplicate names last-win.
 root document
 document <- rows:row+ / empty:!.
-row <- name:[a-z]+ "=" digits:[0-9]+ "\n"
+row <- name:identifier "=" digits:unsigned_integer "\n"
+identifier <- [a-z]+
+unsigned_integer <- [0-9]+
+
+@test(identifier) "lowercase identifier" { input: "apples" expect: "apples" }
+@test(identifier) "identifier rejects punctuation" { input: "apples!" reject: true }
+@test(unsigned_integer) "integer spelling preserved" { input: "0012" expect: "0012" }
 
 # Test the helper without the document's rows wrapper.
 @test(row) "single row helper" {

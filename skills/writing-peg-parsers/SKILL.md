@@ -26,6 +26,22 @@ Read the checkout's `README.md` and `SPEC.md` for the full contract. If neither 
 3. Implement one rule at a time. Run `peg_test grammar.peg` and inspect actual trees with `peg_parse` before designing transforms.
 4. Add `.pegtx` rules. Test final JSON separately, including zero, one and multiple items, nested containers and malformed input.
 
+## Keep rules small
+
+Prefer a document rule that reads as a sequence of named parts, not one giant expression. Factor repeated headers, delimiters, whitespace and token patterns into helpers. Use meaningful names such as `subject`, `identifier`, `eols` and `serial_number`.
+
+Keep lexical helpers uncaptured; capture fields in their semantic rules:
+
+```peg
+root document
+document <- "Serial: " serial_number eols
+serial_number <- serial_number:identifier
+identifier <- [A-Z0-9]+ ("-" [A-Z0-9]+)*
+eols <- ("\n" " "*)+
+```
+
+This `eols` accepts LF endings followed by spaces. Choose LF/CRLF and tab handling deliberately. Use `@test(identifier)`, `@test(eols)` and `@test(serial_number)` to isolate failures. Refactoring must preserve accepted input and capture trees; rerun both helper and document tests. Multiline wrapping improves readability, but does not replace factoring out duplication.
+
 See [reference.md](reference.md) for syntax, capture shapes and transform traps. Adapt the runnable [example.peg](example.peg) and [example.pegtx](example.pegtx). They parse newline-terminated integer assignments into an object.
 
 ```sh
