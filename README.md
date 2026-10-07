@@ -268,6 +268,7 @@ Bundled in `skills/`, including workflow skills from [obra/superpowers](https://
 
 | Skill | Description | Requires |
 |-------|-------------|----------|
+| [pr](skills/pr/SKILL.md) | Visual PR summaries, evidence, and merge risk | None |
 | **brainstorming** | Optional design exploration for unclear requirements | None |
 | **branch-driven-development** | User-selected conversation checkpoints, not independent review | Pi context tools |
 | **dispatching-parallel-agents** | Run 2+ independent tasks in parallel | — |
@@ -283,6 +284,12 @@ Bundled in `skills/`, including workflow skills from [obra/superpowers](https://
 | **verification-before-completion** | Run verification commands before claiming done | — |
 | **writing-plans** | Create multi-step implementation plans from specs | — |
 | **writing-skills** | Create, edit, and verify skills | — |
+
+### Visual PR descriptions
+
+The [pr skill](skills/pr/SKILL.md) adapts Matt Pocock's visual PR format, credited upstream to Dex Horthy at Humanlayer. It uses a small diagram, diff sketch, or tree, followed by real before/after evidence and rollback risk. It respects repository PR templates and does not authorise publication or desktop access.
+
+Ask Pi to write a PR description, or use `/skill:pr`. The source revision and MIT license are included with the skill. Run `python3 tests/pr-skill.test.py` for its registration, attribution, and safety checks.
 
 ### superpowers
 
