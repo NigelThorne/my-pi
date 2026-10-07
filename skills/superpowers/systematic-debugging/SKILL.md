@@ -7,7 +7,7 @@ description: Use when encountering any bug, test failure, or unexpected behavior
 
 ## Overview
 
-Random fixes waste time and create new bugs. Quick patches mask underlying issues.
+Random fixes waste time and create new bugs. Quick patches mask underlying issues. Follow the current user request and repository risk policy. Use read-only evidence first; temporary production instrumentation and other live changes require current approval.
 
 **Core principle:** ALWAYS find root cause before attempting fixes. Symptom fixes are failure.
 
@@ -73,39 +73,23 @@ You MUST complete each phase before proceeding to the next.
 
    **WHEN system has multiple components (CI → build → signing, API → service → database):**
 
-   **BEFORE proposing fixes, add diagnostic instrumentation:**
-   ```
-   For EACH component boundary:
-     - Log what data enters component
-     - Log what data exits component
-     - Verify environment/config propagation
-     - Check state at each layer
+   **Gather targeted, redacted evidence at the relevant boundaries:**
+   - Use existing logs or read-only probes before adding instrumentation.
+   - Record only allowlisted non-secret fields and credential presence, never values or full environment dumps. Disable shell tracing before handling credentials.
+   - Redact captured requests, headers, payloads, and error output before returning them to the agent. Do not print raw output and redact it afterward.
+   - Tag temporary diagnostics so they can be removed. Never add production instrumentation without approval.
 
-   Run once to gather evidence showing WHERE it breaks
-   THEN analyze evidence to identify failing component
-   THEN investigate that specific component
-   ```
+   Compare the same safe observations across layers to find where propagation changes. A presence check is enough when the question is whether a variable reached the process.
 
-   **Example (multi-layer system):**
-   ```bash
-   # Layer 1: Workflow
-   echo "=== Secrets available in workflow: ==="
-   echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
-
-   # Layer 2: Build script
-   echo "=== Env vars in build script: ==="
-   env | grep IDENTITY || echo "IDENTITY not in environment"
-
-   # Layer 3: Signing script
-   echo "=== Keychain state: ==="
-   security list-keychains
-   security find-identity -v
-
-   # Layer 4: Actual signing
-   codesign --sign "$IDENTITY" --verbose=4 "$APP"
-   ```
-
-   **This reveals:** Which layer fails (secrets → workflow ✓, workflow → build ✗)
+```bash
+# Credential presence only; never display its value.
+set +x
+if [ -n "${IDENTITY:-}" ]; then
+  printf 'IDENTITY: SET\n'
+else
+  printf 'IDENTITY: UNSET\n'
+fi
+```
 
 5. **Trace Data Flow**
 
@@ -146,10 +130,10 @@ You MUST complete each phase before proceeding to the next.
 
 **Scientific method:**
 
-1. **Form Single Hypothesis**
-   - State clearly: "I think X is the root cause because Y"
-   - Write it down
-   - Be specific, not vague
+1. **Rank falsifiable hypotheses**
+   - State the leading hypothesis and meaningful alternatives, grounded in evidence.
+   - For each, name the cheapest observation that could disprove it.
+   - Tentative hypotheses may guide evidence collection when a full reproduction is unavailable. Keep that uncertainty explicit; a plausible theory is not permission to patch production.
 
 2. **Test Minimally**
    - Make the SMALLEST possible change to test hypothesis
@@ -176,7 +160,7 @@ You MUST complete each phase before proceeding to the next.
    - Automated test if possible
    - One-off test script if no framework
    - MUST have before fixing
-   - Use the `superpowers:test-driven-development` skill for writing proper failing tests
+   - Read the `test-driven-development` skill for writing proper failing tests
 
 2. **Implement Single Fix**
    - Address the root cause identified
@@ -284,8 +268,8 @@ These techniques are part of systematic debugging and available in this director
 - **`condition-based-waiting.md`** - Replace arbitrary timeouts with condition polling
 
 **Related skills:**
-- **superpowers:test-driven-development** - For creating failing test case (Phase 4, Step 1)
-- **superpowers:verification-before-completion** - Verify fix worked before claiming success
+- **test-driven-development** - For creating a failing test case (Phase 4, Step 1)
+- **verification-before-completion** - Verify the fix worked before claiming success
 
 ## Real-World Impact
 

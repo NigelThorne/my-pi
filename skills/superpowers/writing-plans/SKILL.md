@@ -1,105 +1,31 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: Use when an agreed change needs a multi-step implementation plan, or the user explicitly asks for a plan.
 ---
 
-# Writing Plans
+# Writing plans
 
-## Overview
+Start with the outcome, acceptance criteria, known evidence, risks, and unresolved decisions. Follow the current user request and the repository's risk and delivery policy.
 
-Write comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
+A plan should make execution clear without writing the implementation twice.
 
-Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
+## Plan shape
 
-**Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
+- Goal and scope, including what stays unchanged.
+- Constraints, affected interfaces, and important file paths.
+- Ordered tasks and genuine dependencies. Each task should produce a verifiable result.
+- Relevant test, lint, build, or behaviour checks, including expected outcomes.
+- Rollback or recovery for high-risk work.
+- Decisions or access still needed.
 
-**Context:** This should be run in a dedicated worktree (created by brainstorming skill).
+Include code snippets only when they settle an ambiguity. Verify paths and commands against the repository; leave uncertain details explicit rather than inventing them.
 
-**Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>.md`
+Use `write_artifact` for the working plan and report its name. Use project docs instead only when the requested deliverable is a durable project plan. Track multi-step execution with Pi todo tools.
 
-## Bite-Sized Task Granularity
+## Execution
 
-**Each step is one action (2-5 minutes):**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
-- "Commit" - step
+For a request for a plan only, stop after delivering the plan. For an already approved implementation, proceed with the smallest suitable execution method. Ask only about unresolved decisions, not for repeated approval of settled work.
 
-## Plan Document Header
+A worktree is useful when isolation is needed and the repository permits it. Subagents are useful for bounded independent work. Neither is required merely because a plan exists.
 
-**Every plan MUST start with this header:**
-
-```markdown
-# [Feature Name] Implementation Plan
-
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
-**Goal:** [One sentence describing what this builds]
-
-**Architecture:** [2-3 sentences about approach]
-
-**Tech Stack:** [Key technologies/libraries]
-
----
-```
-
-## Task Structure
-
-```markdown
-### Task N: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-**Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-
-**Step 5: Commit**
-
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
-```
-
-## Remember
-- Exact file paths always
-- Complete code in plan (not "add validation")
-- Exact commands with expected output
-- Reference relevant skills with @ syntax
-- DRY, YAGNI, TDD, frequent commits
-
-## Execution Handoff
-
-After saving the plan, proceed directly with **subagent-driven development** in this session:
-
-> Plan complete and saved to `docs/plans/<filename>.md`. I’ll now execute it with fresh subagents and review each task.
-
-- **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development.
-- Do **not** present an execution-method menu or ask “Which approach?” Subagent-driven execution is the default, not a decision for the user to repeat.
-- Use a different execution workflow only when the user explicitly asks for it, or explicitly asks for a plan without implementation.
+For review gates, read the available `requesting-code-review` skill when its trigger applies. Keep verification evidence tied to acceptance criteria.

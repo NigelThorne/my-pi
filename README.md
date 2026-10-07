@@ -268,9 +268,10 @@ Bundled in `skills/`, including workflow skills from [obra/superpowers](https://
 
 | Skill | Description | Requires |
 |-------|-------------|----------|
-| **brainstorming** | Explores intent, requirements and design before creative work | — |
+| **brainstorming** | Optional design exploration for unclear requirements | None |
+| **branch-driven-development** | User-selected conversation checkpoints, not independent review | Pi context tools |
 | **dispatching-parallel-agents** | Run 2+ independent tasks in parallel | — |
-| **executing-plans** | Execute implementation plans with review checkpoints | — |
+| **executing-plans** | User-selected plan execution with decision-based checkpoints | None |
 | **finishing-a-development-branch** | Guide branch completion (merge, PR, cleanup) | — |
 | **receiving-code-review** | Process code review feedback with technical rigor | — |
 | **requesting-code-review** | Verify work meets requirements before merging | — |
@@ -285,7 +286,11 @@ Bundled in `skills/`, including workflow skills from [obra/superpowers](https://
 
 ### superpowers
 
-14 workflow skills from [obra/superpowers](https://github.com/obra/superpowers) that enforce disciplined development practices — brainstorming before building, writing tests before code, systematic debugging before fixing, and verification before claiming done. These are pure SKILL.md files with no dependencies.
+15 locally adapted workflow skills from [obra/superpowers](https://github.com/obra/superpowers). They follow the global and repository risk policies: focused checks for small changes, evidence-based debugging and testing, and scoped independent review for high-risk work. Brainstorming, worktrees, and delegation are used when needed, not as a mandatory pipeline.
+
+`executing-plans` and `branch-driven-development` are explicit-only. Select them with `/skill:executing-plans` or `/skill:branch-driven-development`. Other skills remain model-discoverable. Existing sessions need `/reload` or a new session to refresh the catalogue; reload does not erase instructions already read into conversation history.
+
+Run the safety-contract checks with `python3 tests/skill-workflow.test.py`. They check routing, obsolete tool references, workspace safeguards, and a synthetic credential-presence example. Scenario evaluation is still needed for workflow behaviour; text checks alone cannot prove compliance.
 
 ## Packages
 

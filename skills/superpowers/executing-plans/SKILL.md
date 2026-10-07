@@ -1,84 +1,20 @@
 ---
 name: executing-plans
-description: Use when you have a written implementation plan to execute in a separate session with review checkpoints
+description: Execute an existing plan with checkpoints at real decisions or blockers.
+disable-model-invocation: true
 ---
 
-# Executing Plans
+# Executing plans
 
-## Overview
+Use this workflow when the user explicitly selects it. Follow current repository policy, including trunk-based development where required.
 
-Load plan, review critically, execute tasks in batches, report for review between batches.
+1. Read the plan and inspect the current workspace. Confirm that its assumptions still hold. Resolve material gaps before editing.
+2. Track tasks with Pi todo tools. Work in dependency order, preserving unrelated changes.
+3. Run the focused verification for each meaningful change. Record results in a session artifact when a handoff needs them.
+4. Continue through approved tasks while no decision or blocker requires the user. Report useful milestones without imposing fixed-size batch pauses. Honour checkpoints the user explicitly requested.
+5. Inspect the complete diff and run relevant final checks. Apply the `requesting-code-review` skill when the risk warrants it.
+6. Follow the repository's delivery policy and current external-change approval requirements. Preserve the workspace unless cleanup is authorised and safe.
 
-**Core principle:** Batch execution with checkpoints for architect review.
+Use a worktree only for actual isolation needs and when permitted. Delegate only when the benefit exceeds coordination cost.
 
-**Announce at start:** "I'm using the executing-plans skill to implement this plan."
-
-## The Process
-
-### Step 1: Load and Review Plan
-1. Read plan file
-2. Review critically - identify any questions or concerns about the plan
-3. If concerns: Raise them with your human partner before starting
-4. If no concerns: Create TodoWrite and proceed
-
-### Step 2: Execute Batch
-**Default: First 3 tasks**
-
-For each task:
-1. Mark as in_progress
-2. Follow each step exactly (plan has bite-sized steps)
-3. Run verifications as specified
-4. Mark as completed
-
-### Step 3: Report
-When batch complete:
-- Show what was implemented
-- Show verification output
-- Say: "Ready for feedback."
-
-### Step 4: Continue
-Based on feedback:
-- Apply changes if needed
-- Execute next batch
-- Repeat until complete
-
-### Step 5: Complete Development
-
-After all tasks complete and verified:
-- Announce: "I'm using the finishing-a-development-branch skill to complete this work."
-- **REQUIRED SUB-SKILL:** Use superpowers:finishing-a-development-branch
-- Follow that skill to verify tests, present options, execute choice
-
-## When to Stop and Ask for Help
-
-**STOP executing immediately when:**
-- Hit a blocker mid-batch (missing dependency, test fails, instruction unclear)
-- Plan has critical gaps preventing starting
-- You don't understand an instruction
-- Verification fails repeatedly
-
-**Ask for clarification rather than guessing.**
-
-## When to Revisit Earlier Steps
-
-**Return to Review (Step 1) when:**
-- Partner updates the plan based on your feedback
-- Fundamental approach needs rethinking
-
-**Don't force through blockers** - stop and ask.
-
-## Remember
-- Review plan critically first
-- Follow plan steps exactly
-- Don't skip verifications
-- Reference skills when plan says to
-- Between batches: just report and wait
-- Stop when blocked, don't guess
-- Never start implementation on main/master branch without explicit user consent
-
-## Integration
-
-**Required workflow skills:**
-- **superpowers:using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
-- **superpowers:writing-plans** - Creates the plan this skill executes
-- **superpowers:finishing-a-development-branch** - Complete development after all tasks
+Stop for an unresolved requirement, missing permission, unsafe workspace state, or evidence that the plan is wrong. Explain what is blocked and the decision needed. Do not end a turn claiming execution will continue without an active executor.

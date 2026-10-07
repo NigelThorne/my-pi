@@ -11,7 +11,7 @@ Help turn ideas into fully formed designs and specs through natural collaborativ
 
 This skill is optional by default. Use it when the user asks to brainstorm, explore options, or shape a design before implementation. Do not force it for every feature request.
 
-Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design in small sections (200-300 words), checking after each section whether it looks right so far.
+Start by understanding the current project context, then ask questions one at a time to refine the idea. Once the direction is clear, present a short design or diagram and confirm any unresolved decisions. Follow the current user request and repository risk policy.
 
 ## When to Use
 
@@ -41,22 +41,22 @@ Do not use this skill when:
 
 **Presenting the design:**
 - Once you believe you understand what you're building, present the design
-- Break it into sections of 200-300 words
-- Ask after each section whether it looks right so far
+- Use short sections or a diagram, with detail only where the decision needs it
+- Ask about genuine decisions rather than repeatedly approving settled requirements
 - Cover: architecture, components, data flow, error handling, testing
 - Be ready to go back and clarify if something doesn't make sense
 
 ## After the Design
 
 **Documentation:**
-- Write the validated design to `docs/plans/YYYY-MM-DD-<topic>-design.md`
-- Use elements-of-style:writing-clearly-and-concisely skill if available
-- Commit the design document to git
+- Save working design notes with `write_artifact`
+- Record durable project decisions in the repository's existing docs when that is part of the agreed outcome
+- Follow repository policy for commits; a design discussion does not itself authorise publication
 
 **Implementation (if continuing):**
-- Ask: "Ready to set up for implementation?"
-- Use superpowers:using-git-worktrees to create isolated workspace
-- Use superpowers:writing-plans to create detailed implementation plan
+- Continue with implementation when already requested and the material decisions are settled
+- Use a worktree only when isolation is useful and permitted by the repository
+- Read `writing-plans` when the work needs a multi-step plan; do not invoke user-selected execution workflows automatically
 
 ## Key Principles
 
