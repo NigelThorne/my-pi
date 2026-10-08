@@ -21,15 +21,16 @@ Foldkit is beta. Its server rendering, including SSG, currently lives in `foldki
 
 1. Read project instructions, `AGENTS.md`, `FOLDKIT.md`, package versions, and lockfile. Fetch [getting started](https://foldkit.dev/get-started.md) and [docs index](https://foldkit.dev/llms.txt). Fetch individual pages as `.md`; avoid loading all of `llms-full.txt`.
 2. Prefer the official scaffolder. Current setup requires Node **22.22.2+**. Use mise for missing runtimes and pnpm for new projects. Run `pnpm create foldkit-app@latest`, choose the agreed rendering mode and pnpm, then inspect generated files and scripts. Preserve an existing package manager.
-3. Scaffolded packages are compatible. For manual installs/upgrades, check exact peers before editing dependencies. At review, Foldkit `0.166.0` pins `effect` and `@effect/platform-browser` to `4.0.0`. Do not assume independently selected latest versions work. Pin deployed Foldkit versions and commit the lockfile.
+3. Treat scaffolded packages as a version-matched starting point, then verify their scripts with the pinned runtime and package manager. For manual installs/upgrades, check exact peers before editing dependencies. At review, Foldkit `0.166.0` pins `effect` and `@effect/platform-browser` to `4.0.0`. Do not assume independently selected latest versions work. Pin deployed Foldkit versions and commit the lockfile.
 4. Use installed types and release-matched examples over remembered APIs. See [reference.md](reference.md) for source lookup and upgrades. Do not silently overwrite personal instructions.
 
 ## Keep the Foldkit architecture
 
-- Schema defines the immutable Model and Messages. Name Messages as facts, such as `ClickedSubmit` or `SucceededLoadPosts`.
-- `update` is exhaustive and pure, returning the next Model and explicit Commands. `view` is pure; event handlers construct Messages rather than fetching or mutating state.
+- Schema defines the immutable Model and Messages. Use tagged lifecycle states to rule out invalid combinations, such as `Live` without a snapshot. Keep independent concerns independent: an in-flight mutation can outlast a connection. Name Messages as facts, such as `ClickedSubmit` or `SucceededLoadPosts`.
+- `init`, `update` and `view` are pure. Supply browser inputs from runtime startup; commands obtain time, randomness and other side effects. `update` is exhaustive and returns the next Model and explicit Commands; view event handlers construct Messages.
 - Use Commands for one-shot Effects, Subscriptions for ongoing Streams, Mounts for element lifecycles, and ManagedResources for scoped live handles. Keep handles out of the Model.
-- Keep runtime startup in `src/entry.ts`, separate from importable application definitions. Use Submodels when ownership warrants them, not for every view fragment.
+- Keep runtime startup in `src/entry.ts`, separate from importable application definitions. Split transport lifecycle and rendering when they have distinct ownership; do not impose a fixed file count on a small counter or unrelated CSS edit. Use Submodels when ownership warrants them, not for every view fragment.
+- Follow the repository's `FOLDKIT.md` conventions during implementation, not just at final cleanup. Keep shared eligibility checks in one place and retain typed failures rather than discarding every error reason.
 - Prefer typed routing and Foldkit/Effect facilities before adding other frameworks. Use `@foldkit/ui` where appropriate; distinguish stateful Submodels from stateless helpers using current component docs. Do not assume React packages or JSX are compatible. Existing-host widgets use the documented embedding API, not a rewrite.
 
 ## Build readable sites
@@ -41,6 +42,8 @@ For public routes, verify initial HTML, titles, canonical URLs, descriptions/sha
 ## Test before hosting
 
 Run the generated formatting checks, lint, typecheck and build. Use Story for transitions/Command wiring and Scene for view interactions. Neither executes Command Effects or proves browser layout, network integration or hydration; test those separately.
+
+For live connections, read the lifecycle section in [reference.md](reference.md). In the tested Effect 4 API, the cleanup returned by `Effect.callback` runs on interruption, not normal completion. Verify both paths, late events after disposal, and delayed HTTP responses while `Offline`. A successful mutation response must not declare a disconnected socket live.
 
 For SSG/SSR, read [reference.md](reference.md) before implementing. Verify the built site and fresh-page hydration with an isolated headless browser when available. Do not take over Nigel's desktop or attach to his browser without permission.
 

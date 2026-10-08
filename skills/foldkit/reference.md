@@ -38,6 +38,41 @@ For SPA, check the installed helper and its release-matched example. For SSG, ve
 
 Check Effect peer compatibility if infrastructure and frontend share a package root. Separate workspace packages if their requirements conflict. Never resolve conflicts with force flags alone. Read the `alchemy` skill before provisioning or running Alchemy dev/tests.
 
+## Live sessions and resource lifetimes
+
+[Little wins at the tested revision](https://github.com/NigelThorne/foldkit-demo/tree/b9ce57972e47f8378985c8818a2bf20d2111fef9) is a worked Foldkit `0.166.0` and Effect `4.0.0` SPA example. It was tested locally and its earlier shared-session release was deployed. This trial did not validate SSR or SSG. Its modules are examples to inspect, not a required template for every app.
+
+### Model ownership
+
+- Use tagged states that carry their required data, such as `Live({ snapshot })`, instead of unrelated flags permitting `Live` without a snapshot.
+- Keep connection status and mutation status separate. A pending HTTP action can survive socket disconnection and reconnection. Do not enable another action until that pending request settles.
+- Only a valid snapshot from the current connection establishes live synchronization. A late HTTP success can refresh the stored count without changing `Offline` or `Connecting` to `Live`.
+- For authoritative server state, guard session identity and snapshot versions. Do not infer that an uncertain write failed, or replay it without an explicit idempotency protocol.
+- Keep failure categories and recovery state meaningful. Network, timeout, HTTP rejection and malformed data are different outcomes. A fresh snapshot must not erase an unrelated clipboard error. Once resynced, do not keep claiming to be reconnecting.
+- Browser WebSocket errors do not expose the upgrade response's HTTP status. Do not label an unknown handshake failure as a definite connection-capacity error.
+
+### Socket ownership
+
+Use a small injectable browser boundary for the connection module. Own one socket per attempt; callbacks must close that socket, never a shared mutable reference that may now point to a newer connection. Browser callback bookkeeping belongs inside that adapter, not in the Model or view.
+
+The tested Effect 4 `Effect.callback` API runs its returned cleanup effect only on interruption. Ordinary `resume(...)` completion does not run it. Either scope acquisition/release around every attempt or explicitly call an idempotent disposer on normal completion as well. Verify against the installed API before adapting this pattern to another version.
+
+Dispose handlers and online/offline listeners before retiring the attempt. Ignore callbacks retained from a retired socket, and cancel pending reconnect work when the subscription ends. Waiting for an online event also needs cleanup on both normal completion and interruption. Use bounded reconnect backoff without automatically replaying mutations.
+
+### Regression cases for a real-time app
+
+| Sequence | Required result |
+| --- | --- |
+| Normal close, then reconnect | Retired listeners removed; one current connection |
+| Subscription interrupted during connection or retry wait | Owned socket closed; no subsequent reconnect |
+| Old callback fires after a new attempt starts | No new message or effect on the current socket |
+| Mutation pending, socket disconnects, HTTP succeeds | Count may refresh; status remains disconnected and edits stay gated |
+| Mutation pending, socket reconnects first | Pending request still gates further mutations |
+| Write commits, but HTTP response is lost or malformed | Refresh authoritative state; no automatic duplicate write |
+| Clipboard fails, then another client updates | Clipboard feedback remains visible |
+
+Use focused lifecycle tests with controlled transport events and time where practical, plus real two-client browser tests. A test that only exercises interruption cannot establish normal-close cleanup. Removing handler properties alone does not prove already-retained callbacks are harmless.
+
 ## Release-matched source and upgrades
 
 Upstream recommends an optional read-only `repos/foldkit/` git subtree. Adding it changes repository size and history; explain that and agree before vendoring. Otherwise fetch targeted source at the installed release tag, `foldkit@<version>`, not `main`. Canary installs use their source commit instead of a release tag. Application imports still come from npm packages, never the reference tree.

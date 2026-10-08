@@ -2,32 +2,42 @@
 
 Fetch current docs before using examples. The v2 API and Effect package versions may change while Alchemy is in beta.
 
-## Smallest Cloudflare stack
+## Choose resources and state
 
-From [getting started](https://alchemy.run/getting-started). This file declares infrastructure; running it through Alchemy can create cloud resources. Writing it does not authorize deployment.
+| Need | Starting point |
+| --- | --- |
+| Static SPA | Framework assets hosting; no R2 or database unless the app needs them |
+| Shared persistent sessions | Worker plus SQLite Durable Objects; preserve the existing site's identity |
+| Solo demo deployment state | Consider `localState()` with private backups and serialized deployments |
+| Shared CI or multiple deployment owners | Choose shared state deliberately; review remote bootstrap and access first |
+
+Local Alchemy state tracks cloud resource ownership. It does not make a deployment local, and it does not contain the app's durable database contents. Keep `.alchemy/` private. Do not switch state backends or copy a deployment to another checkout without a recovery plan.
+
+The `Cloudflare.state()` store is account-shared by default. Its first-use bootstrap requires separate approval and it must not be destroyed as routine project cleanup.
+
+## Minimal static Foldkit website
+
+This v2 shape was exercised with Alchemy `2.0.0-beta.81`. Fetch [current getting started](https://alchemy.run/getting-started) and check installed APIs before reuse. Writing the file does not authorize deployment.
 
 ```typescript
-// alchemy.run.ts
-import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
-import * as Effect from "effect/Effect";
+import * as Alchemy from 'alchemy'
+import * as Cloudflare from 'alchemy/Cloudflare'
+import { localState } from 'alchemy/State/LocalState'
+import * as Effect from 'effect/Effect'
+
+export const Website = Cloudflare.Website.Foldkit('Website')
 
 export default Alchemy.Stack(
-  "MyApp",
-  {
-    providers: Cloudflare.providers(),
-    state: Cloudflare.state(),
-  },
+  'MyApp',
+  { providers: Cloudflare.providers(), state: localState() },
   Effect.gen(function* () {
-    const bucket = yield* Cloudflare.R2.Bucket("Bucket");
-    return { bucketName: bucket.bucketName };
+    const website = yield* Website
+    return { url: website.url }
   }),
-);
+)
 ```
 
-Choose the stack name before first deployment. The remote state store is account-shared by default. Its first-use bootstrap requires separate approval and it must not be destroyed as routine project cleanup.
-
-Prove the first approved resource is live before adding downstream resources. If Nigel has not specified an app, ask what he wants to build after that checkpoint. If the requirements are already clear, continue toward those requirements rather than forcing tutorial steps.
+Choose names before first deployment, then keep them stable. Follow agreed sequencing, but do not provision unrelated tutorial resources or force a bucket-first checkpoint for a website request.
 
 ## Commands and checks
 
@@ -44,6 +54,24 @@ These are references, not a script to execute in sequence. Replace `dev-nigel` a
 | Destroy | `pnpm alchemy destroy --stage dev-nigel --profile default` | Explicit deletion approval, correct ownership and state, data backups |
 
 For a new project, install the Alchemy release selected above plus `effect`, `@effect/platform-bun`, and `@effect/platform-node` versions required by that release and current getting-started docs. Install TypeScript and runtime types as required by the project. Check imports with the actual compiler before reporting the scaffold as verified.
+
+## Troubleshooting observed in the trial
+
+These are observations from `2.0.0-beta.81`, not permanent workarounds to apply blindly.
+
+- **Login reports `NonInteractiveTerminal`.** Alchemy detected Pi in PATH even in a user-driven interactive terminal. `ALCHEMY_TUI=1 pnpm alchemy profile edit --profile default --add Cloudflare` enabled its login UI. Use this only for that diagnosed login failure. Do not automate the user's browser, copy credentials, or treat the override as deployment approval.
+- **First deploy reports `SubdomainNotFound`.** The account had no `workers.dev` subdomain. Have the user complete the account's Workers setup, or obtain approval for the exact cloud setup change. Keep partial Alchemy state; inspect the plan before retrying. Do not discard state or silently select another account.
+- **An approved deploy cannot prompt.** After current approval of an unchanged exact plan, append `--yes` to that deployment command. Without approval, stop. Do not weaken approval checks or blanket-enable non-interactive writes.
+
+## Tested shared-session example
+
+[Little wins at the tested revision](https://github.com/NigelThorne/foldkit-demo/tree/b9ce57972e47f8378985c8818a2bf20d2111fef9) contains the Worker-backed SPA, local Miniflare runner and stack config. It is a learning example, not a production security template. Only the SPA path was exercised; this does not establish SSR or SSG support.
+
+For this release, the existing `Website` declaration gained `main: 'server/worker.ts'`, a `SESSIONS` environment binding from `Cloudflare.DurableObject('WinSession', { className: 'WinSession' })`, and `assets: { runWorkerFirst: ['/api/*'] }`. Verify both the named class export and default Worker export survive the deployment build. The native Worker uses Cloudflare APIs; the frontend remains Foldkit and Effect.
+
+The local-only runner bundles that same Worker into Miniflare with `useSQLite: true`, a private persistence directory and local static assets. No cloud credentials are needed. Each stack gets a separate directory and port; stop/start preserves that stack's SQLite files. A fresh Miniflare restart test and two-browser checks verify more than frontend unit tests alone.
+
+For rollback after sessions exist, retain the `WinSession` export, `SESSIONS` binding and migrations. An older assets-only stack can remove the class and its data. Preserve cloud ownership state and app data separately. The published example documents its cost assumptions; confirm current provider pricing and account plan rather than promising unlimited free use.
 
 ## Common mistakes
 

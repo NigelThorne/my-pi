@@ -49,5 +49,7 @@ The loopback dashboard exposes the same live health action. Check its configured
 
 - New stacks create declared Git worktrees. Use `--worktrees component=/path` only for a discovered existing Git worktree.
 - Do not put secrets in `env`; declare private local files under `envFiles.copy`. Never print their contents.
-- Do not run `cleanup` unless the stack is stopped. It refuses changed worktrees, modified managed local files, or unmerged branches.
-- This is local tooling. Do not substitute product-specific `--backend`, cloud, emulator, or deployment flags; inspect `stack-manager <command> --help` when unsure.
+- Do not run `cleanup` unless the stack is stopped. It refuses changed worktrees, modified managed local files, or unmerged branches. Inspect ignored files too; SQLite state and generated files may be lost when a worktree is removed.
+- For an explicitly requested deletion, `delete <stack> --json` creates a plan; it does not delete the stack. Inspect exact paths, process ownership, data and branch preservation before approving `delete-action` steps. See [reference.md](reference.md) for the approval and recovery checks.
+- A deletion operation marked `completed` may contain failed or skipped steps. Check every result and verify actual resource absence, released ports and the intended registration state. Do not report deletion complete from the top-level status alone.
+- This is local tooling. Do not substitute product-specific `--backend`, cloud, emulator, or deployment flags; inspect `stack-manager <command> --help` when unsure. Bound or filter JSON output; a full project listing can include extensive process history.
