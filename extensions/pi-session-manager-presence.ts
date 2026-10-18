@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, appendFileSync, constants, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +17,11 @@ const tmuxRouteFormat = "#{pid}|#{session_id}|#{window_id}|#{pane_id}";
 let lastTmuxRouteDiagnostic: string | undefined;
 const indexerServiceProtocolVersion = 1;
 const indexerServiceSocketPathEnvironmentKey = "PI_SESSION_MANAGER_SERVICE_SOCKET_PATH";
+const firstMessageSource = "pi-session-manager-presence";
+const firstMessageMaximumBytes = 4_096;
+const firstMessageReplyMaximumBytes = 16_384;
+const firstMessageSocketDeadlineMs = 250;
+const firstMessageRetryDelaysMs = [0, 100, 500] as const;
 const presenceEntryType = "pi-session-manager-presence";
 const presencePublishedEvent = "presence_published";
 const presenceSource = "pi-session-manager-presence";
@@ -33,6 +38,40 @@ function defaultIndexerServiceSocketPath(): string {
 
 type PresenceState = "idle" | "processing" | "stopped";
 type PresenceContext = Pick<ExtensionContext, "cwd" | "isIdle" | "sessionManager">;
+type FirstMessageContext = Pick<ExtensionContext, "cwd" | "sessionManager">;
+
+type FirstMessageRequest = {
+  type: "firstMessage";
+  protocol: 1;
+  requestID: string;
+  source: typeof firstMessageSource;
+  sessionID: string;
+  sessionFile: string;
+  cwd: string;
+  firstLine: string;
+  observedAt: number;
+};
+
+type FirstMessageAck = {
+  type: "firstMessageAck";
+  protocol: 1;
+  requestID: string;
+  status: "accepted" | "duplicate" | "conflict" | "rejected";
+};
+
+type PendingFirstMessage = {
+  firstLine: string;
+  observedAt: number;
+  requestID: string;
+  sessionID: string;
+  sessionFile?: string;
+  resolveSessionFile: () => string | undefined;
+  cwd: string;
+  attempts: number;
+  timer?: ReturnType<typeof setTimeout>;
+  abortController?: AbortController;
+  finished: boolean;
+};
 type PendingPresencePublish = {
   ctx: PresenceContext;
   state: PresenceState;
@@ -121,7 +160,231 @@ type LiveSessionPresenceBridgeOptions = {
   sendAdvisoryPoke?: (stream: AdvisoryPokeStream) => void;
   heartbeatIntervalMs?: number;
   sessionMetadataRetryMs?: number;
+  sendFirstMessage?: (request: FirstMessageRequest, signal?: AbortSignal) => Promise<FirstMessageAck | undefined>;
+  firstMessageRetryDelaysMs?: readonly number[];
+  firstMessageRearmDelayMs?: number;
 };
+
+function truncateUtf8(value: string, maximumBytes: number): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= maximumBytes) return value;
+  let end = maximumBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+export function firstNonblankLine(value: string): string | undefined {
+  for (const line of value.split(/\r?\n|\r/)) {
+    const trimmed = line.trim();
+    if (trimmed) return truncateUtf8(trimmed, firstMessageMaximumBytes);
+  }
+  return undefined;
+}
+
+function userMessageText(entry: unknown): string | undefined {
+  if (!entry || typeof entry !== "object") return undefined;
+  const candidate = entry as { type?: unknown; message?: { role?: unknown; content?: unknown } };
+  if (candidate.type !== "message" || candidate.message?.role !== "user") return undefined;
+  const content = candidate.message.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return undefined;
+  return content
+    .filter((part): part is { type: "text"; text: string } => !!part && typeof part === "object"
+      && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+function historicalFirstLine(ctx: FirstMessageContext): { found: boolean; firstLine?: string } {
+  for (const entry of ctx.sessionManager.getEntries()) {
+    const text = userMessageText(entry);
+    if (text !== undefined) return { found: true, firstLine: firstNonblankLine(text) };
+  }
+  return { found: false };
+}
+
+function validFirstMessageAck(value: unknown, request: FirstMessageRequest): value is FirstMessageAck {
+  if (!value || typeof value !== "object") return false;
+  const ack = value as Partial<FirstMessageAck>;
+  return ack.type === "firstMessageAck" && ack.protocol === 1 && ack.requestID === request.requestID
+    && ["accepted", "duplicate", "conflict", "rejected"].includes(ack.status ?? "");
+}
+
+export function sendFirstMessageToIndexer(
+  socketPath: string,
+  request: FirstMessageRequest,
+  signal?: AbortSignal,
+): Promise<FirstMessageAck | undefined> {
+  return new Promise((resolve) => {
+    const socket = createConnection(socketPath);
+    let settled = false;
+    let reply = Buffer.alloc(0);
+    const finish = (ack?: FirstMessageAck) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      signal?.removeEventListener("abort", onAbort);
+      socket.destroy();
+      resolve(ack);
+    };
+    const onAbort = () => finish();
+    const deadline = setTimeout(() => finish(), firstMessageSocketDeadlineMs);
+    deadline.unref?.();
+    if (signal?.aborted) return finish();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    socket.on("error", () => finish());
+    socket.on("connect", () => socket.write(JSON.stringify(request) + "\n"));
+    socket.on("data", (chunk: Buffer) => {
+      reply = Buffer.concat([reply, chunk]);
+      if (reply.length > firstMessageReplyMaximumBytes) return finish();
+      const newline = reply.indexOf(0x0a);
+      if (newline < 0) return;
+      try {
+        const parsed = JSON.parse(reply.subarray(0, newline).toString("utf8"));
+        finish(validFirstMessageAck(parsed, request) ? parsed : undefined);
+      } catch {
+        finish();
+      }
+    });
+    socket.on("end", () => finish());
+    socket.unref?.();
+  });
+}
+
+export class FirstMessagePublisher {
+  private readonly send: (request: FirstMessageRequest, signal?: AbortSignal) => Promise<FirstMessageAck | undefined>;
+  private readonly retryDelays: readonly number[];
+  private readonly rearmDelayMs: number;
+  private readonly pendingBySessionID = new Map<string, PendingFirstMessage>();
+  private readonly completedSessionIDs = new Set<string>();
+  private stopped = false;
+
+  constructor(options: LiveSessionPresenceBridgeOptions = {}) {
+    const socketPath = options.serviceSocketPath ?? defaultIndexerServiceSocketPath();
+    this.send = options.sendFirstMessage ?? ((request, signal) => sendFirstMessageToIndexer(socketPath, request, signal));
+    this.retryDelays = options.firstMessageRetryDelaysMs ?? firstMessageRetryDelaysMs;
+    this.rearmDelayMs = options.firstMessageRearmDelayMs ?? heartbeatIntervalMs;
+  }
+
+  start(ctx: FirstMessageContext): void {
+    this.stopped = false;
+    const sessionID = ctx.sessionManager.getSessionId();
+    if (!sessionID || this.known(sessionID)) return;
+    const historical = historicalFirstLine(ctx);
+    if (historical.found && !historical.firstLine) {
+      this.completedSessionIDs.add(sessionID);
+      return;
+    }
+    this.capture(historical.firstLine, ctx, sessionID);
+  }
+
+  capturePrompt(event: BeforeAgentStartEvent, ctx: FirstMessageContext): void {
+    if (event.messageType !== "user") return;
+    const sessionID = ctx.sessionManager.getSessionId();
+    if (!sessionID || this.known(sessionID)) return;
+    const historical = historicalFirstLine(ctx);
+    if (historical.found && !historical.firstLine) {
+      this.completedSessionIDs.add(sessionID);
+      return;
+    }
+    const firstLine = historical.found ? historical.firstLine : firstNonblankLine(event.prompt);
+    if (!firstLine) {
+      this.completedSessionIDs.add(sessionID);
+      return;
+    }
+    this.capture(firstLine, ctx, sessionID);
+  }
+
+  rearm(ctx: FirstMessageContext): void {
+    const sessionID = ctx.sessionManager.getSessionId();
+    if (!sessionID) return;
+    const pending = this.pendingBySessionID.get(sessionID);
+    if (!pending || pending.finished || pending.abortController) return;
+    if (!pending.sessionFile) {
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      if (sessionFile) pending.sessionFile = sessionFile;
+    }
+    if (pending.attempts >= this.retryDelays.length) pending.attempts = 0;
+    this.schedule(pending);
+  }
+
+  stop(): void {
+    this.stopped = true;
+    for (const pending of this.pendingBySessionID.values()) {
+      pending.finished = true;
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.abortController?.abort();
+    }
+    this.pendingBySessionID.clear();
+  }
+
+  private known(sessionID: string): boolean {
+    return this.completedSessionIDs.has(sessionID) || this.pendingBySessionID.has(sessionID);
+  }
+
+  private capture(firstLine: string | undefined, ctx: FirstMessageContext, sessionID: string): void {
+    if (!firstLine || this.stopped || this.known(sessionID)) return;
+    const pending: PendingFirstMessage = {
+      firstLine,
+      observedAt: Date.now() / 1_000,
+      requestID: randomUUID(),
+      sessionID,
+      sessionFile: ctx.sessionManager.getSessionFile(),
+      resolveSessionFile: () => ctx.sessionManager.getSessionId() === sessionID
+        ? ctx.sessionManager.getSessionFile()
+        : undefined,
+      cwd: ctx.cwd,
+      attempts: 0,
+      finished: false,
+    };
+    this.pendingBySessionID.set(sessionID, pending);
+    this.schedule(pending);
+  }
+
+  private schedule(pending: PendingFirstMessage): void {
+    if (this.stopped || pending.finished || pending.timer || pending.abortController) return;
+    let delay = this.retryDelays[pending.attempts];
+    if (delay === undefined) {
+      pending.attempts = 0;
+      delay = this.rearmDelayMs;
+    }
+    pending.timer = setTimeout(() => {
+      pending.timer = undefined;
+      if (this.stopped || pending.finished) return;
+      if (!pending.sessionFile) {
+        pending.sessionFile = pending.resolveSessionFile();
+        if (!pending.sessionFile) {
+          pending.attempts += 1;
+          this.schedule(pending);
+          return;
+        }
+      }
+      const request: FirstMessageRequest = {
+        type: "firstMessage", protocol: 1, requestID: pending.requestID, source: firstMessageSource,
+        sessionID: pending.sessionID, sessionFile: pending.sessionFile, cwd: pending.cwd,
+        firstLine: pending.firstLine, observedAt: pending.observedAt,
+      };
+      pending.attempts += 1;
+      const abortController = new AbortController();
+      pending.abortController = abortController;
+      void this.send(request, abortController.signal).then((ack) => {
+        pending.abortController = undefined;
+        if (this.stopped || pending.finished) return;
+        if (ack && validFirstMessageAck(ack, request)) {
+          pending.finished = true;
+          this.completedSessionIDs.add(request.sessionID);
+          this.pendingBySessionID.delete(request.sessionID);
+          return;
+        }
+        this.schedule(pending);
+      }).catch(() => {
+        pending.abortController = undefined;
+        if (!this.stopped && !pending.finished) this.schedule(pending);
+      });
+    }, delay);
+    pending.timer.unref?.();
+  }
+}
 
 function terminalPath(): string | undefined {
   try {
@@ -659,6 +922,7 @@ function sessionFileFrom(result: unknown): string | undefined {
 }
 
 export default function (pi: ExtensionAPI, options: LiveSessionPresenceBridgeOptions = {}) {
+  const firstMessagePublisher = new FirstMessagePublisher(options);
   const bridge = new LiveSessionPresenceBridge({
     ...options,
     onPresencePublished: (publication) => {
@@ -692,11 +956,24 @@ export default function (pi: ExtensionAPI, options: LiveSessionPresenceBridgeOpt
     },
   });
 
-  pi.on("session_start", (_event, ctx) => bridge.start(ctx));
-  pi.on("before_agent_start", (_event, ctx) => bridge.publish(ctx, "processing"));
-  pi.on("agent_settled", (_event, ctx) => bridge.publish(ctx, "idle"));
+  pi.on("session_start", (_event, ctx) => {
+    bridge.start(ctx);
+    firstMessagePublisher.start(ctx);
+  });
+  pi.on("before_agent_start", (event, ctx) => {
+    bridge.publish(ctx, "processing");
+    firstMessagePublisher.rearm(ctx);
+    firstMessagePublisher.capturePrompt(event, ctx);
+  });
+  pi.on("agent_settled", (_event, ctx) => {
+    bridge.publish(ctx, "idle");
+    firstMessagePublisher.rearm(ctx);
+  });
   pi.on("tool_execution_end", (event, ctx) => {
     if (event.toolName === "subagent") bridge.publishSubagentLaunch(ctx, event.result);
   });
-  pi.on("session_shutdown", (_event, ctx) => bridge.stop(ctx));
+  pi.on("session_shutdown", (_event, ctx) => {
+    firstMessagePublisher.stop();
+    bridge.stop(ctx);
+  });
 }

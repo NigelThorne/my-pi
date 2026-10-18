@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
-import registerPresenceExtension, { LiveSessionPresenceBridge, resolveTmuxRoute } from "./pi-session-manager-presence.ts";
+import registerPresenceExtension, {
+  FirstMessagePublisher,
+  LiveSessionPresenceBridge,
+  firstNonblankLine,
+  resolveTmuxRoute,
+  sendFirstMessageToIndexer,
+} from "./pi-session-manager-presence.ts";
 
 // The test runner itself may be hosted in tmux and a managed Ghostty window.
 // Unit tests must not inherit that route unless a case supplies it explicitly.
@@ -13,13 +20,14 @@ for (const name of [
   "PI_GHOSTTY_APP_PID", "PI_GHOSTTY_WINDOW_ID", "PI_GHOSTTY_TERMINAL_ID", "PI_GHOSTTY_PARENT_TTY",
 ]) delete process.env[name];
 
-function context({ sessionID = "session-id", sessionFile = "/sessions/current.jsonl", idle = true } = {}) {
+function context({ sessionID = "session-id", sessionFile = "/sessions/current.jsonl", idle = true, entries = [] } = {}) {
   return {
     cwd: "/projects/forms",
     isIdle: () => idle,
     sessionManager: {
       getSessionFile: () => sessionFile,
       getSessionId: () => sessionID,
+      getEntries: () => entries,
     },
   };
 }
@@ -1716,5 +1724,367 @@ test("omits a tmux route when a later bounded identity query fails", () => {
   } finally {
     bridge.stop(context());
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("publishes the first user line without waiting for presence indexing", async () => {
+  const requests = [];
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async (request) => {
+      requests.push(request);
+      return { type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" };
+    },
+    firstMessageRetryDelaysMs: [0],
+  });
+  const ctx = context();
+
+  publisher.capturePrompt({ messageType: "user", prompt: "\n  First line  \nsecret remainder" }, ctx);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0], {
+    type: "firstMessage",
+    protocol: 1,
+    requestID: requests[0].requestID,
+    source: "pi-session-manager-presence",
+    sessionID: "session-id",
+    sessionFile: "/sessions/current.jsonl",
+    cwd: "/projects/forms",
+    firstLine: "First line",
+    observedAt: requests[0].observedAt,
+  });
+  assert.equal(Number.isFinite(requests[0].observedAt), true);
+  publisher.stop();
+});
+
+test("retries unavailable delivery with one stable request ID and accepts duplicate", async () => {
+  const requests = [];
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async (request) => {
+      requests.push(request);
+      if (requests.length === 1) return undefined;
+      return { type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "duplicate" };
+    },
+    firstMessageRetryDelaysMs: [0, 0],
+  });
+
+  publisher.capturePrompt({ messageType: "user", prompt: "hello" }, context());
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].requestID, requests[1].requestID);
+  publisher.stop();
+});
+
+test("mismatched acknowledgement does not mark the first message delivered", async () => {
+  const requests = [];
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async (request) => {
+      requests.push(request);
+      return requests.length === 1
+        ? { type: "firstMessageAck", protocol: 1, requestID: "wrong", status: "accepted" }
+        : { type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" };
+    },
+    firstMessageRetryDelaysMs: [0, 0],
+  });
+
+  publisher.capturePrompt({ messageType: "user", prompt: "hello" }, context());
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  assert.equal(requests.length, 2);
+  publisher.stop();
+});
+
+test("ignores custom-triggered runs", async () => {
+  let sends = 0;
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async () => { sends += 1; return undefined; },
+    firstMessageRetryDelaysMs: [0],
+  });
+
+  publisher.capturePrompt({ messageType: "custom", message: { role: "custom" } }, context());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(sends, 0);
+  publisher.stop();
+});
+
+test("session start repairs from the earliest user message in full history", async () => {
+  const requests = [];
+  const entries = [
+    { type: "message", message: { role: "user", content: "historical first\nprivate" } },
+    { type: "message", message: { role: "user", content: "resume prompt" } },
+  ];
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async (request) => {
+      requests.push(request);
+      return { type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" };
+    },
+    firstMessageRetryDelaysMs: [0],
+  });
+
+  publisher.start(context({ entries }));
+  publisher.capturePrompt({ messageType: "user", prompt: "resume prompt" }, context({ entries }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].firstLine, "historical first");
+  publisher.stop();
+});
+
+test("freezes session identity before acknowledgement across a session switch", async () => {
+  const requests = [];
+  let resolveFirst;
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: (request) => {
+      requests.push(request);
+      return new Promise((resolve) => { resolveFirst = () => resolve({ type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" }); });
+    },
+    firstMessageRetryDelaysMs: [0],
+  });
+  const mutable = { sessionID: "first", sessionFile: "/sessions/first.jsonl" };
+  const ctx = {
+    cwd: "/first-cwd",
+    sessionManager: {
+      getSessionId: () => mutable.sessionID,
+      getSessionFile: () => mutable.sessionFile,
+      getEntries: () => [],
+    },
+  };
+
+  publisher.capturePrompt({ messageType: "user", prompt: "first prompt" }, ctx);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  mutable.sessionID = "second";
+  mutable.sessionFile = "/sessions/second.jsonl";
+  resolveFirst();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(requests[0].sessionID, "first");
+  assert.equal(requests[0].sessionFile, "/sessions/first.jsonl");
+  assert.equal(requests[0].cwd, "/first-cwd");
+  publisher.stop();
+});
+
+test("preserves the first prompt until missing session metadata appears", async () => {
+  const requests = [];
+  const sessionID = "late-id";
+  let sessionFile;
+  const ctx = {
+    cwd: "/stable-cwd",
+    sessionManager: {
+      getSessionId: () => sessionID,
+      getSessionFile: () => sessionFile,
+      getEntries: () => [],
+    },
+  };
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async (request) => {
+      requests.push(request);
+      return { type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" };
+    },
+    firstMessageRetryDelaysMs: [0, 10],
+  });
+
+  publisher.capturePrompt({ messageType: "user", prompt: "first" }, ctx);
+  publisher.capturePrompt({ messageType: "user", prompt: "later" }, ctx);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  sessionFile = "/sessions/late.jsonl";
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].firstLine, "first");
+  publisher.stop();
+});
+
+test("first-line extraction is UTF-8 bounded and rejects blank prompts", () => {
+  assert.equal(firstNonblankLine(" \n\t\r\n"), undefined);
+  const line = firstNonblankLine(`  ${"😀".repeat(2_000)}\nnot sent`);
+  assert.equal(Buffer.byteLength(line, "utf8"), 4_096);
+  assert.equal(line.includes("not sent"), false);
+  assert.equal(line.endsWith("😀"), true);
+});
+
+test("shutdown aborts an in-flight first-message send and prevents rescheduling", async () => {
+  let calls = 0;
+  let aborted = false;
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: (_request, signal) => {
+      calls += 1;
+      return new Promise((resolve) => signal.addEventListener("abort", () => {
+        aborted = true;
+        resolve(undefined);
+      }, { once: true }));
+    },
+    firstMessageRetryDelaysMs: [0, 0],
+  });
+
+  publisher.capturePrompt({ messageType: "user", prompt: "first" }, context());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  publisher.stop();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(calls, 1);
+  assert.equal(aborted, true);
+});
+
+test("missing session file never binds a first message to a switched session", async () => {
+  const requests = [];
+  let sessionID = "first";
+  let sessionFile;
+  const ctx = {
+    cwd: "/first-cwd",
+    sessionManager: {
+      getSessionId: () => sessionID,
+      getSessionFile: () => sessionFile,
+      getEntries: () => [],
+    },
+  };
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async (request) => {
+      requests.push(request);
+      return { type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" };
+    },
+    firstMessageRetryDelaysMs: [0, 5],
+    firstMessageRearmDelayMs: 10,
+  });
+
+  publisher.capturePrompt({ messageType: "user", prompt: "first fact" }, ctx);
+  sessionID = "second";
+  sessionFile = "/sessions/second.jsonl";
+  publisher.capturePrompt({ messageType: "user", prompt: "second fact" }, ctx);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.deepEqual(requests.map(({ sessionID: id, firstLine }) => [id, firstLine]), [["second", "second fact"]]);
+  publisher.stop();
+});
+
+test("re-arms after a failed retry burst and recovers with the same request ID", async () => {
+  const requests = [];
+  const publisher = new FirstMessagePublisher({
+    sendFirstMessage: async (request) => {
+      requests.push(request);
+      if (requests.length < 3) return undefined;
+      return { type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" };
+    },
+    firstMessageRetryDelaysMs: [0, 0],
+    firstMessageRearmDelayMs: 5,
+  });
+
+  publisher.capturePrompt({ messageType: "user", prompt: "recover me" }, context());
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.equal(requests.length, 3);
+  assert.equal(new Set(requests.map(({ requestID }) => requestID)).size, 1);
+  publisher.stop();
+});
+
+test("an existing blank or image-only first user message blocks fallback to later text", async () => {
+  for (const content of [" \n\t", [{ type: "image", data: "ignored" }]]) {
+    let sends = 0;
+    const entries = [
+      { type: "message", message: { role: "user", content } },
+      { type: "message", message: { role: "user", content: "later historical text" } },
+    ];
+    const publisher = new FirstMessagePublisher({
+      sendFirstMessage: async () => { sends += 1; return undefined; },
+      firstMessageRetryDelaysMs: [0],
+    });
+
+    publisher.capturePrompt({ messageType: "user", prompt: "latest prompt" }, context({ entries }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(sends, 0);
+    publisher.stop();
+  }
+});
+
+test("known session identity avoids rescanning full history", () => {
+  const publisher = new FirstMessagePublisher({ firstMessageRetryDelaysMs: [60_000] });
+  publisher.capturePrompt({ messageType: "user", prompt: "first" }, context());
+  const ctx = context();
+  ctx.sessionManager.getEntries = () => { throw new Error("history should not be scanned"); };
+  assert.doesNotThrow(() => publisher.capturePrompt({ messageType: "user", prompt: "later" }, ctx));
+  publisher.stop();
+});
+
+test("real socket helper frames a request and accepts only its matching ACK", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-first-message-socket-"));
+  const socketPath = join(directory, "indexer.sock");
+  const received = [];
+  const server = createServer((socket) => {
+    let input = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      input += chunk;
+      const newline = input.indexOf("\n");
+      if (newline < 0) return;
+      const request = JSON.parse(input.slice(0, newline));
+      received.push(request);
+      socket.end(JSON.stringify({ type: "firstMessageAck", protocol: 1, requestID: request.requestID, status: "accepted" }) + "\n");
+    });
+  });
+  await new Promise((resolve, reject) => server.listen(socketPath, (error) => error ? reject(error) : resolve()));
+  const request = {
+    type: "firstMessage", protocol: 1, requestID: "request-1", source: "pi-session-manager-presence",
+    sessionID: "session", sessionFile: "/sessions/a.jsonl", cwd: "/cwd", firstLine: "hello", observedAt: 1,
+  };
+
+  try {
+    const ack = await sendFirstMessageToIndexer(socketPath, request);
+    assert.equal(ack?.status, "accepted");
+    assert.deepEqual(received, [request]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("real socket helper rejects mismatched ACKs and bounds a silent server", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-first-message-timeout-"));
+  const socketPath = join(directory, "indexer.sock");
+  let connection = 0;
+  const server = createServer((socket) => {
+    connection += 1;
+    socket.once("data", () => {
+      if (connection === 1) {
+        socket.end(JSON.stringify({ type: "firstMessageAck", protocol: 1, requestID: "wrong", status: "accepted" }) + "\n");
+      }
+    });
+  });
+  await new Promise((resolve, reject) => server.listen(socketPath, (error) => error ? reject(error) : resolve()));
+  const request = {
+    type: "firstMessage", protocol: 1, requestID: "expected", source: "pi-session-manager-presence",
+    sessionID: "session", sessionFile: "/sessions/a.jsonl", cwd: "/cwd", firstLine: "hello", observedAt: 1,
+  };
+
+  try {
+    assert.equal(await sendFirstMessageToIndexer(socketPath, request), undefined);
+    const started = Date.now();
+    assert.equal(await sendFirstMessageToIndexer(socketPath, request), undefined);
+    assert.equal(Date.now() - started < 1_000, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a live blank or image-only first user event permanently blocks later naming while history lags", async () => {
+  for (const event of [
+    { messageType: "user", prompt: "   " },
+    { messageType: "user", prompt: "", images: [{ type: "image", data: "ignored", mimeType: "image/png" }] },
+  ]) {
+    const requests = [];
+    const publisher = new FirstMessagePublisher({
+      sendFirstMessage: async (request) => { requests.push(request); return undefined; },
+      firstMessageRetryDelaysMs: [0],
+    });
+    const laggingContext = context({ entries: [] });
+
+    publisher.capturePrompt(event, laggingContext);
+    publisher.capturePrompt({ messageType: "user", prompt: "later text" }, laggingContext);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    assert.deepEqual(requests, []);
+    publisher.stop();
   }
 });
