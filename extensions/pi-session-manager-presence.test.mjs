@@ -5,10 +5,13 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 import registerPresenceExtension, {
   FirstMessagePublisher,
   LiveSessionPresenceBridge,
   firstNonblankLine,
+  resolveActiveGhosttySurface,
+  resolveTmuxGhosttyClient,
   resolveTmuxRoute,
   sendFirstMessageToIndexer,
 } from "./pi-session-manager-presence.ts";
@@ -20,9 +23,10 @@ for (const name of [
   "PI_GHOSTTY_APP_PID", "PI_GHOSTTY_WINDOW_ID", "PI_GHOSTTY_TERMINAL_ID", "PI_GHOSTTY_PARENT_TTY",
 ]) delete process.env[name];
 
-function context({ sessionID = "session-id", sessionFile = "/sessions/current.jsonl", idle = true, entries = [] } = {}) {
+function context({ sessionID = "session-id", sessionFile = "/sessions/current.jsonl", idle = true, entries = [], hasUI = true } = {}) {
   return {
     cwd: "/projects/forms",
+    hasUI,
     isIdle: () => idle,
     sessionManager: {
       getSessionFile: () => sessionFile,
@@ -779,12 +783,349 @@ test("does not overwrite Zellij pane-managed terminal titles", () => {
   }
 });
 
-test("registers the /register-window command", () => {
+test("registers separate /register-window and /re-register-window commands", () => {
   const pi = makePi();
 
   registerPresenceExtension(pi);
 
   assert.equal(typeof pi.commands.get("register-window")?.handler, "function");
+  assert.equal(typeof pi.commands.get("re-register-window")?.handler, "function");
+  assert.match(pi.commands.get("re-register-window").description, /until session switch, \/reload, or Pi restart/);
+});
+
+test("embedded Ghostty JXA executes stable, changed, missing, and duplicate fixtures", () => {
+  const execute = ({ mutate = () => {}, duplicate = false, missing = false, incarnationChange = false } = {}) => {
+    let captured;
+    const result = resolveActiveGhosttySurface({ execFile: (_command, args) => {
+      captured = args.at(-1);
+      let frontReads = 0;
+      const identifier = (id) => ({ valueForKey: (key) => key === "id" ? id : undefined });
+      const terminal = identifier("terminal-2");
+      const tab = { ...identifier("tab-2"), valueForKey(key) {
+        if (key === "id") return "tab-2";
+        if (key === "focusedTerminal") return missing ? undefined : terminal;
+      } };
+      const front = { ...identifier("window-2"), valueForKey(key) {
+        if (key === "id") return "window-2";
+        if (key === "selectedTab") return tab;
+      }, elementArrayWithCode: () => ({ count: duplicate ? 2 : 1, objectAtIndex: () => terminal }) };
+      const app = { valueForKey(key) {
+        if (key === "frontWindow") { frontReads++; mutate(frontReads, tab, terminal); return front; }
+      }, elementArrayWithCode: () => ({ count: 1, objectAtIndex: () => front }) };
+      const running = { bundleIdentifier: "com.mitchellh.ghostty", processIdentifier: 321, launchDate: { description: "launch-a" } };
+      const changedRunning = { ...running, launchDate: { description: "launch-b" } };
+      let runningReads = 0;
+      const workspace = { get frontmostApplication() { runningReads++; return incarnationChange && runningReads > 1 ? changedRunning : running; } };
+      const sandbox = {
+        ObjC: { import() {}, unwrap: (value) => value },
+        $: { NSWorkspace: { sharedWorkspace: workspace }, SBApplication: { alloc: { initWithProcessIdentifier: () => app } } },
+      };
+      return String(vm.runInNewContext(`${captured}; run()`, sandbox));
+    } });
+    assert.match(captured, /elementArrayWithCode/);
+    return result;
+  };
+  assert.deepEqual(execute(), { ok: true, identity: { appPID: 321, windowID: "window-2", terminalID: "terminal-2" } });
+  assert.deepEqual(execute({ missing: true }), { ok: false, reason: "invalid" });
+  assert.deepEqual(execute({ duplicate: true }), { ok: false, reason: "ambiguous" });
+  assert.deepEqual(execute({ incarnationChange: true }), { ok: false, reason: "changed" });
+  assert.deepEqual(execute({ mutate: (read, tab) => { if (read === 2) tab.valueForKey = (key) => key === "id" ? "changed-tab" : undefined; } }), { ok: false, reason: "changed" });
+});
+
+test("active Ghostty resolver accepts only its fixed validated protocol", () => {
+  const invoke = (output) => resolveActiveGhosttySurface({ execFile: () => output });
+  assert.deepEqual(invoke("OK\t321\twindow-2\tterminal-2\n"), {
+    ok: true,
+    identity: { appPID: 321, windowID: "window-2", terminalID: "terminal-2" },
+  });
+  assert.deepEqual(invoke("NOT_FRONTMOST\n"), { ok: false, reason: "not-frontmost" });
+  assert.deepEqual(invoke("CHANGED\n"), { ok: false, reason: "changed" });
+  assert.deepEqual(invoke("AMBIGUOUS\n"), { ok: false, reason: "ambiguous" });
+  assert.deepEqual(invoke("OK\t321\twindow-2\tterminal-2\textra\n"), { ok: false, reason: "invalid" });
+  assert.deepEqual(invoke("OK\t321\twindow-2\tbad\nterminal\n"), { ok: false, reason: "invalid" });
+  assert.deepEqual(resolveActiveGhosttySurface({ execFile: () => { throw new Error("secret raw failure"); } }), {
+    ok: false,
+    reason: "unavailable",
+  });
+});
+
+test("tmux client resolution requires one stable exact route, process tty, command, and Ghostty ancestry", () => {
+  const route = { socketPath: "/tmp/tmux.sock", serverPID: 50, serverStartTime: "start", sessionID: "$1", windowID: "@2", paneID: "%3" };
+  let rows = "610|/dev/ttys020|$1|@2|%3";
+  const execFile = (command, args) => {
+    if (command === "tmux") return rows;
+    const pid = args[1];
+    const field = args.at(-1);
+    if (field === "tty=") return "ttys020";
+    if (field === "command=") return "/opt/homebrew/bin/tmux -S /tmp/tmux.sock";
+    if (field === "ppid=") return pid === "610" ? "400" : "1";
+    throw new Error("unexpected query");
+  };
+  const options = { execFile, tmuxExecutable: "tmux" };
+  assert.equal(resolveTmuxGhosttyClient(route, 400, options), "/dev/ttys020");
+  rows = "610|/dev/ttys020|$1|@2|%3\n610|/dev/ttys020|$1|@2|%3";
+  assert.equal(resolveTmuxGhosttyClient(route, 400, options), undefined);
+  rows = "";
+  assert.equal(resolveTmuxGhosttyClient(route, 400, options), undefined);
+});
+
+test("explicit tmux re-registration publishes the fresh client tty consumed by focus routing", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  const route = { socketPath: "/tmp/tmux.sock", serverPID: 50, serverStartTime: "start", sessionID: "$1", windowID: "@2", paneID: "%3" };
+  registerPresenceExtension(pi, {
+    directory, terminalPath: () => "/dev/ttys007", tmuxRuntime: () => true, tmuxRoute: () => route,
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "old", terminalID: "old", parentTTY: "/dev/ttys999" }),
+    resolveActiveGhosttySurface: () => ({ ok: true, identity: { appPID: 400, windowID: "active-window", terminalID: "active-terminal" } }),
+    resolveTmuxGhosttyClient: () => "/dev/ttys020", sendAdvisoryPoke: () => {}, heartbeatIntervalMs: 60_000,
+  });
+  try {
+    pi.handlers.get("session_start")({}, context());
+    const result = await pi.commands.get("re-register-window").handler("", context());
+    const record = readRecord(join(directory, "session-id.json"));
+    assert.match(result, /Registry write: succeeded/);
+    assert.equal(record.ghosttyParentTTY, "/dev/ttys020");
+    assert.deepEqual(record.tmux, route);
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("explicit re-registration replaces stale bootstrap identity and survives heartbeat and /register-window", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const recordPath = join(directory, "session-id.json");
+  const bindingObservations = [];
+  const pi = makePi({ onAppend: (type, data) => {
+    if (type === "pi-session-manager-window-binding") {
+      bindingObservations.push({ event: data.event, windowID: data.ghosttyWindowID, published: readRecord(recordPath).ghosttyWindowID });
+    }
+  } });
+  const pokes = [];
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => "zellij-session",
+    zellijPaneID: () => "terminal_9",
+    managedGhosttyIdentity: () => ({
+      appPID: 300, windowID: "stale-window", terminalID: "stale-terminal", parentTTY: "/dev/ttys999",
+    }),
+    resolveActiveGhosttySurface: () => ({
+      ok: true, identity: { appPID: 400, windowID: "active-window", terminalID: "active-terminal" },
+    }),
+    sendAdvisoryPoke: (stream) => pokes.push(stream),
+    heartbeatIntervalMs: 60_000,
+  });
+  const ctx = context();
+
+  try {
+    pi.handlers.get("session_start")({}, ctx);
+    pokes.length = 0;
+    const result = await pi.commands.get("re-register-window").handler("", ctx);
+    assert.match(result, /override lasts until session switch, \/reload, or Pi restart/);
+    let record = readRecord(recordPath);
+    assert.equal(record.ghosttyAppPID, 400);
+    assert.equal(record.ghosttyWindowID, "active-window");
+    assert.equal(record.ghosttyTerminalID, "active-terminal");
+    assert.equal("ghosttyParentTTY" in record, false);
+    assert.deepEqual(pokes, ["presence"]);
+    assert.deepEqual(bindingObservations, [
+      { event: "ghostty_binding", windowID: "stale-window", published: "stale-window" },
+      { event: "ghostty_binding_ended", windowID: "stale-window", published: "active-window" },
+      { event: "ghostty_binding", windowID: "active-window", published: "active-window" },
+    ]);
+
+    pi.handlers.get("agent_settled")({}, ctx);
+    record = readRecord(recordPath);
+    assert.equal(record.ghosttyWindowID, "active-window");
+    const registerResult = await pi.commands.get("register-window").handler("", ctx);
+    assert.match(registerResult, /explicitly re-registered/);
+    assert.equal(readRecord(recordPath).ghosttyWindowID, "active-window");
+  } finally {
+    pi.handlers.get("session_shutdown")({}, ctx);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("re-registration rejects noninteractive and failed lookups without mutation", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  let lookups = 0;
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => "zellij-session",
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "window-1", terminalID: "terminal-1" }),
+    resolveActiveGhosttySurface: () => { lookups += 1; return { ok: false, reason: "ambiguous" }; },
+    sendAdvisoryPoke: () => {},
+    heartbeatIntervalMs: 60_000,
+  });
+  try {
+    pi.handlers.get("session_start")({}, context());
+    const before = readFileSync(join(directory, "session-id.json"), "utf8");
+    const noUI = await pi.commands.get("re-register-window").handler("", context({ hasUI: false }));
+    assert.match(noUI, /requires an interactive Pi client/);
+    assert.equal(lookups, 0);
+    const failed = await pi.commands.get("re-register-window").handler("", context());
+    assert.match(failed, /existing registration is unchanged/);
+    assert.equal(readFileSync(join(directory, "session-id.json"), "utf8"), before);
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("direct sessions reject an active Ghostty process outside Pi ancestry", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => undefined,
+    zellijPaneID: () => undefined,
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "window-1", terminalID: "terminal-1" }),
+    resolveActiveGhosttySurface: () => ({
+      ok: true, identity: { appPID: 400, windowID: "active-window", terminalID: "active-terminal" },
+    }),
+    directGhosttyAncestryMatches: () => false,
+    sendAdvisoryPoke: () => {}, heartbeatIntervalMs: 60_000,
+  });
+  try {
+    pi.handlers.get("session_start")({}, context());
+    const before = readFileSync(join(directory, "session-id.json"), "utf8");
+    const result = await pi.commands.get("re-register-window").handler("", context());
+    assert.match(result, /does not own this direct Pi terminal/);
+    assert.equal(readFileSync(join(directory, "session-id.json"), "utf8"), before);
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("session switch clears an explicit re-registration and returns to bootstrap identity", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const pi = makePi();
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => "zellij-session",
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "bootstrap-window", terminalID: "bootstrap-terminal" }),
+    resolveActiveGhosttySurface: () => ({
+      ok: true, identity: { appPID: 400, windowID: "active-window", terminalID: "active-terminal" },
+    }),
+    sendAdvisoryPoke: () => {}, heartbeatIntervalMs: 60_000,
+  });
+  try {
+    pi.handlers.get("session_start")({}, context());
+    await pi.commands.get("re-register-window").handler("", context());
+    pi.handlers.get("agent_settled")({}, context({ sessionID: "next-session", sessionFile: "/sessions/next.jsonl" }));
+    const record = readRecord(join(directory, "next-session.json"));
+    assert.equal(record.ghosttyWindowID, "bootstrap-window");
+    assert.equal(record.ghosttyTerminalID, "bootstrap-terminal");
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context({ sessionID: "next-session", sessionFile: "/sessions/next.jsonl" }));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("failed re-registration publication rolls back candidate and binding history", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  const record = join(directory, "session-id.json");
+  const observations = [];
+  const pi = makePi({ onAppend: (type, data) => {
+    if (type === "pi-session-manager-window-binding") {
+      observations.push({ event: data.event, windowID: data.ghosttyWindowID, published: existsSync(record) ? readRecord(record).ghosttyWindowID : undefined });
+    }
+  } });
+  registerPresenceExtension(pi, {
+    directory,
+    terminalPath: () => "/dev/ttys007",
+    workspace: () => "zellij-session",
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "bootstrap-window", terminalID: "bootstrap-terminal" }),
+    resolveActiveGhosttySurface: () => ({
+      ok: true, identity: { appPID: 400, windowID: "candidate-window", terminalID: "candidate-terminal" },
+    }),
+    sendAdvisoryPoke: () => {}, heartbeatIntervalMs: 60_000,
+  });
+  const ctx = context();
+  try {
+    pi.handlers.get("session_start")({}, ctx);
+    const initialEntries = entriesOfType(pi, "pi-session-manager-window-binding").length;
+    rmSync(directory, { recursive: true, force: true });
+    writeFileSync(directory, "blocks registry directory");
+    const result = await pi.commands.get("re-register-window").handler("", ctx);
+    assert.match(result, /existing registration is unchanged/);
+    assert.equal(entriesOfType(pi, "pi-session-manager-window-binding").length, initialEntries);
+
+    rmSync(directory, { force: true });
+    pi.handlers.get("agent_settled")({}, ctx);
+    assert.equal(readRecord(record).ghosttyWindowID, "bootstrap-window");
+    assert.equal(entriesOfType(pi, "pi-session-manager-window-binding").some(({ data }) => data.ghosttyWindowID === "candidate-window"), false);
+    assert.deepEqual(observations.slice(0, 1), [{ event: "ghostty_binding", windowID: "bootstrap-window", published: "bootstrap-window" }]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("post-commit history and publication callback failures report committed success without rollback", async (t) => {
+  for (const boundary of ["history", "publication"]) {
+    await t.test(boundary, async () => {
+      const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+      let fail = true;
+      const options = {
+        directory, terminalPath: () => "/dev/ttys007", workspace: () => "zellij",
+        managedGhosttyIdentity: () => ({ appPID: 300, windowID: "old", terminalID: "old-terminal" }),
+        resolveActiveGhosttySurface: () => ({ ok: true, identity: { appPID: 400, windowID: "candidate", terminalID: "candidate-terminal" } }),
+        sendAdvisoryPoke: () => {}, heartbeatIntervalMs: 60_000,
+      };
+      if (boundary === "history") options.appendPresenceHistory = (path, line) => {
+        if (JSON.parse(line).ghosttyWindowID === "candidate" && fail) { fail = false; throw new Error("history failure"); }
+        writeFileSync(path, line, { flag: "a" });
+      };
+      if (boundary === "publication") options.onPresencePublished = (publication) => {
+        if (publication.ghosttyWindowID === "candidate" && fail) { fail = false; throw new Error("publication failure"); }
+      };
+      const pi = makePi();
+      registerPresenceExtension(pi, options);
+      try {
+        pi.handlers.get("session_start")({}, context());
+        const result = await pi.commands.get("re-register-window").handler("", context());
+        assert.equal(readRecord(join(directory, "session-id.json")).ghosttyWindowID, "candidate");
+        assert.match(result, /live snapshot committed, but a best-effort history or binding callback failed/);
+      } finally {
+        pi.handlers.get("session_shutdown")({}, context());
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test("post-commit binding failure retains the new snapshot, reports a warning, and converges on heartbeat", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pi-session-manager-presence-"));
+  let failCandidate = true;
+  const pi = makePi({ onAppend: (type, data) => {
+    if (type === "pi-session-manager-window-binding" && data.ghosttyWindowID === "candidate" && failCandidate) {
+      failCandidate = false;
+      throw new Error("injected callback failure");
+    }
+  } });
+  registerPresenceExtension(pi, {
+    directory, terminalPath: () => "/dev/ttys007", workspace: () => "zellij",
+    managedGhosttyIdentity: () => ({ appPID: 300, windowID: "old", terminalID: "old-terminal" }),
+    resolveActiveGhosttySurface: () => ({ ok: true, identity: { appPID: 400, windowID: "candidate", terminalID: "candidate-terminal" } }),
+    sendAdvisoryPoke: () => {}, heartbeatIntervalMs: 60_000,
+  });
+  try {
+    pi.handlers.get("session_start")({}, context());
+    const result = await pi.commands.get("re-register-window").handler("", context());
+    assert.equal(readRecord(join(directory, "session-id.json")).ghosttyWindowID, "candidate");
+    assert.match(result, /live snapshot committed, but a best-effort history or binding callback failed/);
+    pi.handlers.get("agent_settled")({}, context());
+    assert.equal(entriesOfType(pi, "pi-session-manager-window-binding").at(-1).data.ghosttyWindowID, "candidate");
+  } finally {
+    pi.handlers.get("session_shutdown")({}, context());
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("appends the initial complete managed Ghostty binding to the Pi session", () => {
