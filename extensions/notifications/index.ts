@@ -21,6 +21,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
+import { reconnectLink, sendMacNotification, validateNotificationLink } from "./notification-link.mjs";
 
 function findCommand(cmd: string): string | null {
   try {
@@ -80,19 +81,17 @@ function playChime() {
   } catch {}
 }
 
-function showNotification(message: string, title: string = "pi") {
-  if (!HAS_NOTIFIER) return;
-  try {
-    if (NOTIFY_ME_PATH) {
-      execFileSync(NOTIFY_ME_PATH, [
-        "--title", title,
-        "--message", message,
-        "--sound", "off",
-      ]);
-    } else if (NOTIFY_SEND_PATH) {
-      execFileSync(NOTIFY_SEND_PATH, [title, message]);
-    }
-  } catch {}
+function showNotification(message: string, title: string = "pi", link?: string) {
+  if (NOTIFY_ME_PATH) {
+    sendMacNotification(execFileSync, NOTIFY_ME_PATH, message, title, link);
+    return;
+  }
+  if (NOTIFY_SEND_PATH) {
+    if (link) throw new Error("notification links are not supported by notify-send");
+    execFileSync(NOTIFY_SEND_PATH, [title, message]);
+    return;
+  }
+  throw new Error("no notification tool is available");
 }
 
 export default function (pi: ExtensionAPI) {
@@ -117,7 +116,7 @@ export default function (pi: ExtensionAPI) {
     name: "notify",
     label: "Notify",
     description:
-      "Send a system notification to the user. Use this to alert the user about important events, completed tasks, or when you need their attention.",
+      "Send a system notification to the user. The message must identify the sender (for example, 'Pi worker: …'). On macOS, an optional link overrides the click destination; otherwise the click reconnects to the current Pi session using pisessionmanager://session/<encoded-session-id>/reconnect. Linux notify-send does not support links, so passing link there fails instead of claiming support.",
     parameters: Type.Object({
       message: Type.String({ description: "Notification message body" }),
       title: Type.Optional(
@@ -128,14 +127,22 @@ export default function (pi: ExtensionAPI) {
           description: "Play chime sound (default: true)",
         })
       ),
+      link: Type.Optional(
+        Type.String({
+          description: "macOS click destination override (http, https, or pisessionmanager URL)",
+        })
+      ),
     }),
 
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const title = params.title ?? "pi";
       const sound = params.sound !== false;
+      const link = params.link !== undefined
+        ? validateNotificationLink(params.link)
+        : IS_MACOS ? reconnectLink(ctx.sessionManager.getSessionId()) : undefined;
 
       if (sound) playChime();
-      showNotification(params.message, title);
+      showNotification(params.message, title, link);
 
       return {
         content: [
@@ -144,7 +151,7 @@ export default function (pi: ExtensionAPI) {
             text: `Notification sent: "${params.message}"`,
           },
         ],
-        details: { message: params.message, title, sound },
+        details: { message: params.message, title, sound, link },
       };
     },
 
@@ -152,6 +159,7 @@ export default function (pi: ExtensionAPI) {
       let text = theme.fg("toolTitle", theme.bold("notify "));
       text += theme.fg("muted", `"${args.message}"`);
       if (args.title) text += theme.fg("dim", ` (${args.title})`);
+      if (args.link) text += theme.fg("dim", ` → ${args.link}`);
       return new Text(text, 0, 0);
     },
 
