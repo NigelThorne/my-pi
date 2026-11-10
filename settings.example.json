@@ -1,6 +1,6 @@
 {
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "defaultProvider": "cpa",
+  "defaultModel": "coding",
   "defaultThinkingLevel": "medium",
   "doubleEscapeAction": "tree",
   "theme": "dark",
