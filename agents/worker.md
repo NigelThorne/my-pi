@@ -1,7 +1,7 @@
 ---
 name: worker
 description: General-purpose subagent with full capabilities, isolated context
-model: openai-codex/gpt-5.6-sol
+model: cpa/coding
 thinking: low
 auto-exit: true
 ---

@@ -1,7 +1,7 @@
 ---
 name: remover
 description: Surgical code removal agent - deletes files and removes imports/exports/references
-model: openai-codex/gpt-5.6-sol
+model: cpa/coding
 thinking: medium
 auto-exit: true
 ---

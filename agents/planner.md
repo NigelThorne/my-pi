@@ -2,7 +2,7 @@
 name: planner
 description: Creates implementation plans from context and requirements
 tools: read, grep, find, ls
-model: openai-codex/gpt-5.6-sol
+model: cpa/smart
 thinking: high
 auto-exit: true
 ---
