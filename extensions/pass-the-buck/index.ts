@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 const RELAY_ENV = "PI_PASS_THE_BUCK_HANDOFF_ID";
 const HANDOFF_TOOLS = new Set(["pass_the_buck_ask", "pass_the_buck_reply", "pass_the_buck_take_over"]);
-const SUBAGENT_GUIDANCE = "The pass_the_buck_* tools are for replacement sessions launched by /pass-the-buck, not ordinary subagent-to-parent communication. subagent_steer is parent-to-child only. If blocked and no independent work remains, send a concise blocker summary with the exact question or decision needed, then immediately call subagent_done with that summary to return control to your parent. Do not claim the task succeeded when reporting a blocker.";
+const SUBAGENT_GUIDANCE = "The pass_the_buck_* tools are for replacement sessions launched by /pass-the-buck, not ordinary subagent-to-parent communication. subagent_steer can address any explicitly identified live local Pi session. If blocked and no independent work remains, send a concise blocker summary with the exact question or decision needed, then immediately call subagent_done with that summary to return control to your parent. Do not claim the task succeeded when reporting a blocker.";
 const MIN_RETRO_TOKENS = 16_384;
 const DEFAULT_POLL_INTERVAL_MS = 750;
 const SUMMARIZER_TIMEOUT_MS = 120_000;
