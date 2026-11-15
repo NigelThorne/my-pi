@@ -60,7 +60,8 @@ function getAllMemories(cwd: string): Memory[] {
 export default function (pi: ExtensionAPI) {
 	// Auto-inject memories into system prompt
 	pi.on("before_agent_start", async (event, ctx) => {
-		const all = getAllMemories(ctx.cwd);
+		if (process.env.PI_NO_MEMORIES === "1") return;
+		const all = getAllMemories(ctx.cwd).filter((m) => !(m as { disabled?: boolean }).disabled);
 		if (all.length === 0) return;
 
 		// Take the 50 most recent if there are too many
