@@ -12,7 +12,6 @@ Tmux 3.6a is managed by mise. `~/.tmux.conf` sources this repository's `tmux.con
 - Pi subagents and `/pass-the-buck` target the source pane's window, not whichever window happens to be selected.
 - `pi-fork-tab` keeps its history-fork behavior and opens a tmux window when invoked in tmux.
 - `ask`, `ask-with-tools` and `ask-ollama` capture the current tmux pane when no piped input is supplied. Their Zellij and piped-input paths remain available.
-- Mycelium names the current pane through `shell/mux-rename-pane.zsh`.
 
 From outside tmux, `re-tmux --socket /absolute/socket/path` attaches to the most recently active session on that server. `open-detached-tmux-sessions --socket /absolute/socket/path --dry-run` lists sessions without clients. Omit `--dry-run` to open attach windows. The existing `re-zellij` and Zellij-specific scripts are unchanged.
 
@@ -28,7 +27,7 @@ tmux display-message -p '#{socket_path}'
 
 Focus revalidates the route before switching. A live Pi without a terminal gets an attachment, not a second Pi. Confirmed-dead recovery uses the original full JSONL path and cwd. Unknown launch outcomes stay pending rather than authorizing another writer.
 
-The tmux helpers coexist with `ghostty-zellij-*`; no global `PI_SUBAGENT_MUX=tmux` is needed. PTC and Mycelium environment settings must be exported before the bootstrap can launch Pi directly.
+The tmux helpers coexist with `ghostty-zellij-*`; no global `PI_SUBAGENT_MUX=tmux` is needed. PTC environment settings must be exported before the bootstrap can launch Pi directly.
 
 A `Pi Route <id>` window title is the bootstrap's location probe, not an error or Pi conversation name. Ordinary windows get fresh probe IDs; managed requests retain their claim-once token. The title can remain visible until the terminal updates it.
 

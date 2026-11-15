@@ -38,10 +38,9 @@ class ZshrcTmuxTests(unittest.TestCase):
     def test_additive_tiled_helpers_loaded(self):
         self.assertTrue(any('source "$HOME/.my-pi/shell/tmux-helpers.zsh"' in line for line in self.lines), "Load the separately named tmux tiled helpers")
 
-    def test_connected_hook_not_zellij_only(self):
-        hooks = [line for line in self.lines if line.startswith("export MYCELIUM_CONNECTED_COMMAND=")]
-        self.assertEqual(len(hooks), 1, "Expected one connected hook")
-        self.assertFalse("='zellij action rename-pane" in hooks[0], "Connected hook must select the current mux")
+    def test_retired_integration_not_configured(self):
+        self.assertFalse(any("MYCELIUM_" in line for line in self.lines),
+                         "Retired integration hooks must not be configured")
 
 
 if __name__ == "__main__":

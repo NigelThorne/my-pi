@@ -171,10 +171,7 @@ run_pi() {
     -e "PI_GHOSTTY_WINDOW_ID=${PI_GHOSTTY_WINDOW_ID}"
     -e "PI_GHOSTTY_TERMINAL_ID=${PI_GHOSTTY_TERMINAL_ID}"
   )
-  for inherited_name in \
-      PTC_ALLOW_UNSANDBOXED_SUBPROCESS \
-      MYCELIUM_CONNECTED_COMMAND \
-      MYCELIUM_HELP_FALLBACK_COMMAND; do
+  for inherited_name in PTC_ALLOW_UNSANDBOXED_SUBPROCESS; do
     if (( ${+parameters[$inherited_name]} )); then
       environment_arguments+=(-e "${inherited_name}=${(P)inherited_name}")
     fi

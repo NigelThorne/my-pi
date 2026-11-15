@@ -116,8 +116,8 @@ assert_contains "run-pi preserves spaced cwd as one argument" "$run_calls" "-c $
 assert_contains "run-pi directly executes Pi" "$run_calls" "$run_directory/pi --session /tmp/session\\ with\\ space.jsonl"
 assert_contains "run-pi passes exact Ghostty terminal identity" "$run_calls" "PI_GHOSTTY_TERMINAL_ID=terminal-managed"
 assert_contains "run-pi overrides a reused server with current PTC policy" "$run_calls" "PTC_ALLOW_UNSANDBOXED_SUBPROCESS=true"
-assert_contains "run-pi overrides a reused server with the current Mycelium connected hook" "$run_calls" "MYCELIUM_CONNECTED_COMMAND=connected\\ hook\\ with\\ spaces"
-assert_contains "run-pi overrides a reused server with the current Mycelium fallback hook" "$run_calls" "MYCELIUM_HELP_FALLBACK_COMMAND=fallback\\ hook\\ with\\ spaces"
+assert_not_contains "run-pi does not forward retired connected hook" "$run_calls" "MYCELIUM_CONNECTED_COMMAND="
+assert_not_contains "run-pi does not forward retired fallback hook" "$run_calls" "MYCELIUM_HELP_FALLBACK_COMMAND="
 assert_not_contains "run-pi does not set global subagent mux" "$run_calls" "PI_SUBAGENT_MUX"
 /bin/rm -rf "$run_directory"
 
