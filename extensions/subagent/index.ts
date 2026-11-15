@@ -22,7 +22,17 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { type ExtensionAPI, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
-import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
+import {
+	prepareModelChoice,
+	prepareRuntimeModelReplacement,
+	type CategoryChoice,
+	type ModelCategory,
+} from "../pi-interactive-subagents/pi-extension/subagents/model-categories.ts";
+import {
+	findRuntimeModelRejection,
+	formatRuntimeModelRejection,
+} from "../pi-interactive-subagents/pi-extension/subagents/runtime-model-errors.ts";
+import { discoverAgents, type AgentConfig, type AgentScope } from "./agents.js";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -141,7 +151,7 @@ interface UsageStats {
 
 interface SingleResult {
 	agent: string;
-	agentSource: "user" | "project" | "unknown";
+	agentSource: AgentConfig["source"] | "unknown";
 	task: string;
 	exitCode: number;
 	messages: Message[];
@@ -151,6 +161,13 @@ interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	errorKind?: string;
+	category?: ModelCategory;
+	pinnedChoice?: CategoryChoice;
+	thinking?: string;
+	definitionFile?: string;
+	definitionHash?: string;
+	replacement?: unknown;
 }
 
 interface SubagentDetails {
@@ -158,6 +175,13 @@ interface SubagentDetails {
 	agentScope: AgentScope;
 	projectAgentsDir: string | null;
 	results: SingleResult[];
+}
+
+function resultErrorMessage(result: SingleResult): string {
+	const original = result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
+	return result.errorKind === "unsupported_model" && result.category
+		? formatRuntimeModelRejection(result.category, original, result.replacement)
+		: original;
 }
 
 function getFinalOutput(messages: Message[]): string {
@@ -227,6 +251,7 @@ async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
+	ctx: any,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -244,8 +269,24 @@ async function runSingleAgent(
 		};
 	}
 
+	const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
+	if (signal?.aborted) return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: "Subagent launch cancelled.", usage: emptyUsage, step, errorKind: "cancelled" };
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--model", agent.model);
+	const modelResolution = await prepareModelChoice(agent.model, agent.thinking, {
+		registry: ctx.modelRegistry,
+		ui: ctx.hasUI ? ctx.ui : undefined,
+		hasUI: ctx.hasUI,
+		signal,
+	});
+	if (modelResolution.kind !== "resolved") {
+		return {
+			agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: modelResolution.request,
+			usage: emptyUsage, step, errorKind: modelResolution.kind, category: "category" in modelResolution ? modelResolution.category : undefined,
+		};
+	}
+	if (signal?.aborted) return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: "Subagent launch cancelled.", usage: emptyUsage, step, errorKind: "cancelled" };
+	if (modelResolution.model) args.push("--model", modelResolution.provider ? `${modelResolution.provider}/${modelResolution.model}` : modelResolution.model);
+	if (modelResolution.thinking) args.push("--thinking", modelResolution.thinking);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	let tmpPromptDir: string | null = null;
@@ -259,7 +300,14 @@ async function runSingleAgent(
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: agent.model,
+		model: modelResolution.provider ? `${modelResolution.provider}/${modelResolution.model}` : modelResolution.model,
+		thinking: modelResolution.thinking,
+		category: modelResolution.category,
+		pinnedChoice: modelResolution.configuredChoice ?? (modelResolution.category && modelResolution.provider
+			? { provider: modelResolution.provider, model: modelResolution.model, ...(modelResolution.thinking ? { thinking: modelResolution.thinking } : {}) }
+			: undefined),
+		definitionFile: agent.filePath,
+		definitionHash: agent.fileHash,
 		step,
 	};
 
@@ -284,7 +332,7 @@ async function runSingleAgent(
 		let wasAborted = false;
 
 		const exitCode = await new Promise<number>((resolve) => {
-			const proc = spawn("pi", args, { cwd: cwd ?? defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+			const proc = spawn("pi", args, { cwd: path.resolve(defaultCwd, cwd ?? "."), shell: false, stdio: ["ignore", "pipe", "pipe"] });
 			let buffer = "";
 
 			const processLine = (line: string) => {
@@ -359,6 +407,22 @@ async function runSingleAgent(
 
 		currentResult.exitCode = exitCode;
 		if (wasAborted) throw new Error("Subagent was aborted");
+		const rejection = currentResult.pinnedChoice
+			? findRuntimeModelRejection(currentResult.messages, currentResult.pinnedChoice)
+			: undefined;
+		if (rejection && currentResult.category && currentResult.pinnedChoice) {
+			currentResult.errorKind = "unsupported_model";
+			try {
+				currentResult.replacement = await prepareRuntimeModelReplacement(
+					currentResult.category,
+					currentResult.pinnedChoice,
+					rejection.model,
+					{ registry: ctx.modelRegistry, ui: ctx.hasUI ? ctx.ui : undefined, hasUI: ctx.hasUI, signal },
+				);
+			} catch (error: any) {
+				currentResult.replacement = { kind: "conflict", request: error?.message ?? String(error) };
+			}
+		}
 		return currentResult;
 	} finally {
 		if (tmpPromptPath)
@@ -420,7 +484,13 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
-			const discovery = discoverAgents(ctx.cwd, agentScope);
+			if (signal?.aborted) return {
+				content: [{ type: "text", text: "Subagent launch cancelled." }],
+				details: { mode: "single", agentScope, projectAgentsDir: null, results: [], kind: "cancelled" },
+				isError: true,
+			};
+			const discoveryFor = (taskCwd?: string) => discoverAgents(path.resolve(ctx.cwd, taskCwd ?? params.cwd ?? "."), agentScope);
+			const discovery = discoveryFor();
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
@@ -452,18 +522,24 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents && ctx.hasUI) {
-				const requestedAgentNames = new Set<string>();
-				if (params.chain) for (const step of params.chain) requestedAgentNames.add(step.agent);
-				if (params.tasks) for (const t of params.tasks) requestedAgentNames.add(t.agent);
-				if (params.agent) requestedAgentNames.add(params.agent);
-
-				const projectAgentsRequested = Array.from(requestedAgentNames)
-					.map((name) => agents.find((a) => a.name === name))
-					.filter((a): a is AgentConfig => a?.source === "project");
+				const requestedDefinitions: AgentConfig[] = [];
+				if (params.chain) for (const step of params.chain) {
+					const found = discoveryFor(step.cwd).agents.find((agent) => agent.name === step.agent);
+					if (found) requestedDefinitions.push(found);
+				}
+				if (params.tasks) for (const task of params.tasks) {
+					const found = discoveryFor(task.cwd).agents.find((agent) => agent.name === task.agent);
+					if (found) requestedDefinitions.push(found);
+				}
+				if (params.agent) {
+					const found = discoveryFor(params.cwd).agents.find((agent) => agent.name === params.agent);
+					if (found) requestedDefinitions.push(found);
+				}
+				const projectAgentsRequested = requestedDefinitions.filter((agent) => agent.source === "project");
 
 				if (projectAgentsRequested.length > 0) {
 					const names = projectAgentsRequested.map((a) => a.name).join(", ");
-					const dir = discovery.projectAgentsDir ?? "(unknown)";
+					const dir = [...new Set(projectAgentsRequested.map((agent) => path.dirname(agent.filePath)))].join(", ");
 					const ok = await ctx.ui.confirm(
 						"Run project-local agents?",
 						`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
@@ -501,22 +577,22 @@ export default function (pi: ExtensionAPI) {
 
 					const result = await runSingleAgent(
 						ctx.cwd,
-						agents,
+						discoveryFor(step.cwd).agents,
 						step.agent,
 						taskWithContext,
-						step.cwd,
+						step.cwd ?? params.cwd,
 						i + 1,
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
+						ctx,
 					);
 					results.push(result);
 
 					const isError =
 						result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
 					if (isError) {
-						const errorMsg =
-							result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
+						const errorMsg = resultErrorMessage(result);
 						return {
 							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}` }],
 							details: makeDetails("chain")(results),
@@ -574,10 +650,10 @@ export default function (pi: ExtensionAPI) {
 				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
 					const result = await runSingleAgent(
 						ctx.cwd,
-						agents,
+						discoveryFor(t.cwd).agents,
 						t.agent,
 						t.task,
-						t.cwd,
+						t.cwd ?? params.cwd,
 						undefined,
 						signal,
 						// Per-task update callback
@@ -588,6 +664,7 @@ export default function (pi: ExtensionAPI) {
 							}
 						},
 						makeDetails("parallel"),
+						ctx,
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -622,11 +699,11 @@ export default function (pi: ExtensionAPI) {
 					signal,
 					onUpdate,
 					makeDetails("single"),
+					ctx,
 				);
 				const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
 				if (isError) {
-					const errorMsg =
-						result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
+					const errorMsg = resultErrorMessage(result);
 					return {
 						content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
 						details: makeDetails("single")([result]),
