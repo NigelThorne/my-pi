@@ -1,7 +1,7 @@
 ---
 name: remover
 description: Surgical code removal agent - deletes files and removes imports/exports/references
-model: cpa/coding
+model: anthropic/claude-fable-5
 thinking: medium
 auto-exit: true
 ---

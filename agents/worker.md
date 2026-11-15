@@ -1,7 +1,7 @@
 ---
 name: worker
 description: General-purpose subagent with full capabilities, isolated context
-model: cpa/coding
+model: anthropic/claude-fable-5
 thinking: low
 auto-exit: true
 ---

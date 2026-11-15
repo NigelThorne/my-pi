@@ -2,7 +2,7 @@
 name: reviewer
 description: Code review specialist for quality and security analysis
 tools: read, grep, find, ls, bash
-model: cpa/smart
+model: anthropic/claude-fable-5
 thinking: high
 auto-exit: true
 ---
