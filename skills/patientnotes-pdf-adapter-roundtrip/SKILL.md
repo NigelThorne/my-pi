@@ -1,6 +1,7 @@
 ---
 name: patientnotes-pdf-adapter-roundtrip
 description: Use when asked to turn a PDF form into a PatientNotes PDF adapter ZIP, correct or complete an existing PDF adapter form, validate questions or placements, roundtrip a PDF through questions/answers/population, inspect AcroForm coverage, or produce questions.json/placements.json/export bundles for PDF forms.
+disable-model-invocation: true
 ---
 
 # PatientNotes PDF Adapter Roundtrip
