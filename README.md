@@ -89,26 +89,9 @@ The `chrome-cdp` package is configured in `settings.example.json`. It accesses a
 
 ## Extensions
 
-### pi-session-manager-presence.ts
+### Session presence (moved to psc)
 
-Publishes exact local presence for every persisted Pi session to `~/.pi/agent/session-manager/live/` in two files:
-
-- `<sessionID>.json` is the atomically replaced current-state snapshot that Pi Session Manager already reads.
-- `<sessionID>.jsonl` is an append-only history. Each publication adds the same full JSON record, including `pid`, `state`, and `updatedAt` in Unix milliseconds, followed by a newline. Session IDs are URI-encoded in both filenames.
-
-Publications include startup, each 15-second heartbeat, activity updates, explicit registration, and graceful shutdown. The extension never truncates or deletes the JSONL history on session switches or restarts. It does not backfill older snapshots or rotate the log. Both files are created with owner-only permissions. They are not a transaction: history is appended before snapshot replacement, and a failed history append is logged without blocking the snapshot update. The files record presence; they do not lock a session against duplicate Pi processes.
-
-Pi Session Manager continues to use the snapshot to match the session ID and Pi session JSONL path, then displays **Processing** or **Idle** without guessing from CWD. No PSM reader changes are required yet.
-
-The extension is loaded automatically because `~/.pi/agent/settings.json` includes `~/.my-pi/extensions`. Run `/reload` or restart already-open Pi sessions to activate it. A clean shutdown publishes a `stopped` record. PSM may prune stale JSON snapshots; the JSONL history remains.
-
-`/register-window` republishes the current identity and displays the registry file, write result, and exact JSON payload. This includes the TTY, Ghostty window/terminal/parent TTY, tmux route, and Zellij settings when present. `null` means unavailable; omitted fields were not sent. A failed write shows the attempted payload without claiming registration succeeded.
-
-Test it with:
-
-```bash
-node --test ~/.my-pi/extensions/pi-session-manager-presence{,-history}.test.mjs ~/.my-pi/extensions/pi-session-manager-register-window.test.mjs
-```
+The old `pi-session-manager-presence.ts` extension was retired with Pi Session Manager on 2026-11-19. Session presence, working/idle activity and `/re-register` now come from **psc-presence** (`~/code/psc/extensions/psc-presence`, loaded via `packages` in `~/.pi/agent/settings.json`). `subagent_status` reads psc-presence records first and falls back to any legacy `~/.pi/agent/session-manager/live/` records.
 
 ### todo.ts
 
