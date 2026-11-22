@@ -23,7 +23,7 @@ tmux display-message -p '#{socket_path}'
 
 ## Session Manager
 
-`~/code/pi_session_manager` supports both backends. A tmux route carries the socket, server incarnation and exact session/window/pane IDs. Ghostty window identity and validated client PID/TTY remain separate from the Pi conversation UUID and JSONL file.
+`~/code/psc/pi_session_manager` supports both backends. A tmux route carries the socket, server incarnation and exact session/window/pane IDs. Ghostty window identity and validated client PID/TTY remain separate from the Pi conversation UUID and JSONL file.
 
 Focus revalidates the route before switching. A live Pi without a terminal gets an attachment, not a second Pi. Confirmed-dead recovery uses the original full JSONL path and cwd. Unknown launch outcomes stay pending rather than authorizing another writer.
 

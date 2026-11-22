@@ -91,7 +91,7 @@ The `chrome-cdp` package is configured in `settings.example.json`. It accesses a
 
 ### Session presence (moved to psc)
 
-The old `pi-session-manager-presence.ts` extension was retired with Pi Session Manager on 2026-11-19. Session presence, working/idle activity and `/re-register` now come from **psc-presence** (`~/code/psc/extensions/psc-presence`, loaded via `packages` in `~/.pi/agent/settings.json`). `subagent_status` reads psc-presence records first and falls back to any legacy `~/.pi/agent/session-manager/live/` records.
+The old `pi-session-manager-presence.ts` extension was retired with Pi Session Manager on 2026-11-19. Session presence, working/idle activity and `/re-register` now come from **psc-presence** (`~/code/psc/psc/extensions/psc-presence`, loaded via `packages` in `~/.pi/agent/settings.json`). `subagent_status` reads psc-presence records first and falls back to any legacy `~/.pi/agent/session-manager/live/` records.
 
 ### todo.ts
 
